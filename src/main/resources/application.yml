@@ -1,0 +1,53 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: agent-buyer
+  datasource:
+    url: ${MYSQL_URL:jdbc:mysql://127.0.0.1:3307/agent_buyer?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:}
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6380}
+      timeout: 2s
+  flyway:
+    enabled: true
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+
+agent:
+  redis-key-prefix: agent
+  max-parallel: 6
+  max-scan: 256
+  lease-ms: 90000
+  confirmation-ttl: 10m
+  agent-loop:
+    max-turns: 10
+    tool-result-timeout-ms: 90000
+    run-wallclock-timeout-ms: 300000
+    hard-token-cap: 30000
+  executor:
+    core-pool-size: 8
+    max-pool-size: 32
+    queue-capacity: 256
+  llm:
+    provider: deepseek
+    deepseek:
+      base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com/v1}
+      api-key: ${DEEPSEEK_API_KEY:}
+      default-model: ${DEEPSEEK_MODEL:deepseek-reasoner}
+      request-timeout: 60s
+  rate-limit:
+    runs-per-user-per-minute: 5
+    tokens-per-user-per-day: 100000
