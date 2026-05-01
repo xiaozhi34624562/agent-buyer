@@ -1,6 +1,7 @@
 package com.ai.agent.loop;
 
 import com.ai.agent.application.ConfirmationIntentService;
+import com.ai.agent.application.HumanIntentResolver;
 import com.ai.agent.application.ContinuationLockService;
 import com.ai.agent.application.RunAccessManager;
 import com.ai.agent.application.RunStateMachine;
@@ -115,7 +116,11 @@ class V20ProviderSelectionIntegrationTest {
                 new RunEventSinkRegistry(),
                 runAccessManager,
                 turnOrchestrator(properties, trajectoryStore, objectMapper, qwen, deepseek),
-                new ConfirmationIntentService(),
+                new HumanIntentResolver(
+                        new ConfirmationIntentService(),
+                        (ignoredRunId, ignoredUserId, ignoredRunContext, ignoredMessage) ->
+                                HumanIntentResolver.ConfirmationDecision.confirm(0.99, "test")
+                ),
                 new ConfirmTokenStore(properties, redisTemplate, objectMapper)
         );
 

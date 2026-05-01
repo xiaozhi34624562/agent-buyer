@@ -83,7 +83,13 @@ public final class CancelOrderTool extends AbstractTool {
         try {
             CancelArgs args = objectMapper.readValue(defaultJson(use.argsJson()), CancelArgs.class);
             if (args.orderId() == null || args.orderId().isBlank()) {
-                return ToolValidation.rejected(error("missing_order_id", "orderId is required"));
+                return ToolValidation.rejected(objectMapper.writeValueAsString(Map.of(
+                        "type", "missing_order_id",
+                        "message", "orderId is required",
+                        "recoverable", true,
+                        "nextActionRequired", "user_input",
+                        "question", "请提供要取消的订单号。如果不确定订单号，可以先让我查询你的订单。"
+                )));
             }
             return ToolValidation.accepted(objectMapper.writeValueAsString(args));
         } catch (Exception e) {

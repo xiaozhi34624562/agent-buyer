@@ -235,7 +235,9 @@ RedisToolRuntime + ToolRegistry + Tool
 | `ToolCallCoordinator` | domain/service | 提交 assistant tool calls、执行 precheck、ingest Redis、等待 terminal result |
 | `ToolResultCloser` | domain/service | 为 timeout、abort、executor reject、precheck failure 等路径生成 synthetic tool result |
 | `RunStateMachine` | domain | 集中表达 run 状态迁移，拒绝非法状态跳转 |
-| `ConfirmationIntentService` | domain/service | 判断用户确认、拒绝或模糊输入，替代散落的字符串 contains 判断 |
+| `ConfirmationIntentService` | domain/service | 高置信规则分类，快速判断明确确认、拒绝或需要语义兜底的输入 |
+| `HumanIntentResolver` | domain/service | 编排 human-in-the-loop 判断：规则先判，规则不命中时调用 LLM 结构化分类，低置信或失败时 fail closed 为追问 |
+| `ProviderSemanticConfirmationIntentClassifier` | infrastructure boundary | 使用当前 run provider / fallback provider 判断长尾确认语义，只返回结构化 JSON，不直接执行写操作；分类调用写入 `agent_llm_attempt` 与 `confirmation_intent_llm` event |
 | `TrajectoryWriter` | persistence boundary | 写 run、message、attempt、tool call、tool result 等关键轨迹 |
 | `TrajectoryReader` | persistence boundary | 给 provider replay 和内部 repair 读取原始 messages |
 | `TrajectoryQueryService` | application/query | 对外 trajectory DTO 查询，负责权限、字段裁剪和脱敏 |
@@ -250,7 +252,10 @@ RedisToolRuntime + ToolRegistry + Tool
 - `abort_requested` 是 run control 信号，必须被 scheduler、runtime、complete 和 tool cancellation token 共同使用。
 - abort 对工具的处理必须区分副作用风险：`WAITING` 和幂等 `RUNNING` 工具可以 synthetic cancel；非幂等 `RUNNING` 写工具不立即合成取消结果，后续真实 complete 仍可写入 trajectory，以保证审计不掩盖已发生的业务副作用。
 - assistant tool call 一旦写入 MySQL，就必须由 `ToolResultCloser` 负责在任何失败路径上闭合。
-- `ConfirmationIntentService` 把 continuation 输入分为确认、拒绝、模糊；模糊输入只追加澄清 assistant message，并把 run 恢复到 `WAITING_USER_CONFIRMATION`，不进入 provider。
+- human-in-the-loop 确认采用三层边界：`ConfirmationIntentService` 先做高置信规则判断；规则不命中时 `HumanIntentResolver` 调用 provider-backed classifier 进行结构化语义判断；低置信、解析失败或 provider 失败统一 fail closed 为追问，并把 run 恢复到 `WAITING_USER_CONFIRMATION`。
+- provider-backed classifier 本身也是一次 LLM 调用，必须写入 `agent_llm_attempt`；分类结果额外写 `confirmation_intent_llm` event，方便区分真实 agent turn 与 human-in-the-loop 策略判断。
+- provider-backed classifier 只能影响“继续/拒绝/追问”的控制流，不能绕过服务端 `confirmToken + argsHash + userId + runId + toolName` 校验。
+- tool precheck failure 必须区分 fatal 与 recoverable；缺少 `orderId` 这类可由用户补充的信息时，tool result 带 `recoverable=true` 和 `nextActionRequired=user_input`，AgentLoop 将 run 置为 `PAUSED` 并通过 SSE 追问。
 - abort 只对 active run 做 CAS 迁移；已终态 run 返回原状态，避免用户重复点击或客户端重试覆盖历史结论。
 - 对外 trajectory 查询只能返回 DTO，不能直接返回 MyBatis entity 或 provider raw payload。
 

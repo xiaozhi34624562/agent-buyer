@@ -244,6 +244,21 @@ public final class AgentTurnOrchestrator {
                 if (stopped != null) {
                     return stopped;
                 }
+                if (toolStep.pendingUserInput() != null) {
+                    String finalText = toolStep.pendingUserInput().question();
+                    AgentRunResult terminal = transitionFromRunning(
+                            runId,
+                            RunStatus.PAUSED,
+                            "tool needs user input",
+                            finalText
+                    );
+                    if (terminal.status() != RunStatus.PAUSED) {
+                        return terminal;
+                    }
+                    sink.onFinal(new FinalEvent(runId, finalText, RunStatus.PAUSED, "user_input"));
+                    log.info("agent run paused because tool needs user input");
+                    return terminal;
+                }
                 if (toolStep.pendingConfirm() != null) {
                     AgentRunResult terminal = transitionFromRunning(
                             runId,

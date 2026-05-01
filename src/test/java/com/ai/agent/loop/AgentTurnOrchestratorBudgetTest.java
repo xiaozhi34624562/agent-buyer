@@ -26,10 +26,15 @@ import com.ai.agent.skill.command.SkillCommandResolver;
 import com.ai.agent.skill.core.SkillRegistry;
 import com.ai.agent.skill.path.SkillPathResolver;
 import com.ai.agent.support.TestObjectProvider;
+import com.ai.agent.tool.core.Tool;
+import com.ai.agent.tool.core.ToolSchema;
+import com.ai.agent.tool.core.ToolUseContext;
+import com.ai.agent.tool.core.ToolValidation;
 import com.ai.agent.tool.model.CancelReason;
 import com.ai.agent.tool.model.StartedTool;
 import com.ai.agent.tool.model.ToolCall;
 import com.ai.agent.tool.model.ToolTerminal;
+import com.ai.agent.tool.model.ToolUse;
 import com.ai.agent.tool.registry.ToolRegistry;
 import com.ai.agent.tool.runtime.ToolResultCloser;
 import com.ai.agent.tool.runtime.ToolResultWaiter;
@@ -354,6 +359,40 @@ class AgentTurnOrchestratorBudgetTest {
         });
     }
 
+    @Test
+    void recoverablePrecheckFailurePausesRunForUserInputInsteadOfFailingTheToolLoop() {
+        AgentProperties properties = new AgentProperties();
+        properties.getAgentLoop().setLlmCallBudgetPerUserTurn(30);
+        properties.getAgentLoop().setRunWideLlmCallBudget(80);
+        FakeTrajectoryStore trajectoryStore = new FakeTrajectoryStore();
+        trajectoryStore.statusByRun.put("run-1", RunStatus.RUNNING);
+        trajectoryStore.messagesByRun.put("run-1", new ArrayList<>(List.of(LlmMessage.user("u1", "取消张三的订单"))));
+        ToolCallingProvider provider = new ToolCallingProvider(new ToolCallMessage("call-1", "cancel_order", "{}"));
+        ObjectMapper objectMapper = new ObjectMapper();
+        AgentTurnOrchestrator orchestrator = orchestrator(
+                properties,
+                trajectoryStore,
+                provider,
+                new InMemoryRunLlmCallBudgetStore(),
+                record -> null,
+                contextViewBuilder(properties, trajectoryStore, objectMapper),
+                objectMapper,
+                new ToolRegistry(List.of(new RecoverableCancelOrderTool()))
+        );
+        CapturingSink sink = new CapturingSink();
+
+        AgentRunResult result = orchestrator.runUntilStop("run-1", "user-1", runContext("run-1", List.of("cancel_order")), null, sink);
+
+        assertThat(result.status()).isEqualTo(RunStatus.PAUSED);
+        assertThat(result.finalText()).contains("订单号");
+        assertThat(trajectoryStore.statusByRun.get("run-1")).isEqualTo(RunStatus.PAUSED);
+        assertThat(sink.finals).singleElement().satisfies(event -> {
+            assertThat(event.status()).isEqualTo(RunStatus.PAUSED);
+            assertThat(event.nextActionRequired()).isEqualTo("user_input");
+            assertThat(event.finalText()).contains("订单号");
+        });
+    }
+
     private static AgentTurnOrchestrator orchestrator(
             AgentProperties properties,
             FakeTrajectoryStore trajectoryStore,
@@ -408,7 +447,27 @@ class AgentTurnOrchestratorBudgetTest {
                 budgetStore,
                 compactionStore,
                 contextViewBuilder,
-                objectMapper
+                objectMapper,
+                new ToolRegistry(List.of())
+        );
+    }
+
+    private static ContextViewBuilder contextViewBuilder(
+            AgentProperties properties,
+            FakeTrajectoryStore trajectoryStore,
+            ObjectMapper objectMapper
+    ) {
+        return new ContextViewBuilder(
+                trajectoryStore,
+                new TranscriptPairValidator(),
+                new LargeResultSpiller(properties, new TokenEstimator()),
+                new MicroCompactor(properties, new TokenEstimator()),
+                new SummaryCompactor(
+                        properties,
+                        new TokenEstimator(),
+                        new DeterministicSummaryGenerator(objectMapper),
+                        objectMapper
+                )
         );
     }
 
@@ -419,7 +478,8 @@ class AgentTurnOrchestratorBudgetTest {
             RunLlmCallBudgetStore budgetStore,
             ContextCompactionStore compactionStore,
             ContextViewBuilder contextViewBuilder,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            ToolRegistry toolRegistry
     ) {
         return new AgentTurnOrchestrator(
                 properties,
@@ -432,7 +492,7 @@ class AgentTurnOrchestratorBudgetTest {
                 ),
                 new ToolCallCoordinator(
                         properties,
-                        new ToolRegistry(List.of()),
+                        toolRegistry,
                         (ToolRuntime) (runId, call) -> {
                         },
                         new FakeRedisToolStore(),
@@ -446,6 +506,27 @@ class AgentTurnOrchestratorBudgetTest {
                 trajectoryStore,
                 new RunStateMachine(trajectoryStore),
                 new AgentExecutionBudget(properties, budgetStore)
+        );
+    }
+
+    private static AgentTurnOrchestrator orchestrator(
+            AgentProperties properties,
+            FakeTrajectoryStore trajectoryStore,
+            LlmProviderAdapter provider,
+            RunLlmCallBudgetStore budgetStore,
+            ContextCompactionStore compactionStore,
+            ContextViewBuilder contextViewBuilder,
+            ObjectMapper objectMapper
+    ) {
+        return orchestrator(
+                properties,
+                trajectoryStore,
+                provider,
+                budgetStore,
+                compactionStore,
+                contextViewBuilder,
+                objectMapper,
+                new ToolRegistry(List.of())
         );
     }
 
@@ -464,9 +545,13 @@ class AgentTurnOrchestratorBudgetTest {
     }
 
     private static RunContext runContext(String runId) {
+        return runContext(runId, List.of());
+    }
+
+    private static RunContext runContext(String runId, List<String> tools) {
         return new RunContext(
                 runId,
-                List.of(),
+                tools,
                 "deepseek-reasoner",
                 "deepseek",
                 "qwen",
@@ -475,6 +560,53 @@ class AgentTurnOrchestratorBudgetTest {
                 LocalDateTime.now(),
                 LocalDateTime.now()
         );
+    }
+
+    private static final class ToolCallingProvider implements LlmProviderAdapter {
+        private final ToolCallMessage toolCall;
+
+        private ToolCallingProvider(ToolCallMessage toolCall) {
+            this.toolCall = toolCall;
+        }
+
+        @Override
+        public String providerName() {
+            return "deepseek";
+        }
+
+        @Override
+        public String defaultModel() {
+            return "deepseek-reasoner";
+        }
+
+        @Override
+        public LlmStreamResult streamChat(LlmChatRequest request, LlmStreamListener listener) {
+            request.beforeProviderCall();
+            return new LlmStreamResult("", List.of(toolCall), FinishReason.TOOL_CALLS, null, null);
+        }
+    }
+
+    private static final class RecoverableCancelOrderTool implements Tool {
+        @Override
+        public ToolSchema schema() {
+            return new ToolSchema(
+                    "cancel_order",
+                    "Cancel order",
+                    "{}",
+                    false,
+                    false,
+                    java.time.Duration.ofSeconds(1),
+                    1024,
+                    List.of()
+            );
+        }
+
+        @Override
+        public ToolValidation validate(ToolUseContext ctx, ToolUse use) {
+            return ToolValidation.rejected("""
+                    {"type":"missing_order_id","recoverable":true,"nextActionRequired":"user_input","question":"请提供要取消的订单号。"}
+                    """.trim());
+        }
     }
 
     private static final class CountingProvider implements LlmProviderAdapter {

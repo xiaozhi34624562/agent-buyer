@@ -159,6 +159,7 @@ Path: /Users/xiaozhi/.codex/skills/java-alibaba-review/SKILL.md
 |---|---|---|---|---|
 | V2-E2E-01 | 重置真实 LLM E2E 全量套件 | 独立脚本覆盖订单取消、ToDo、SubAgent、interrupt、skill slash / skill_list / skill_view、三类 context compact、DeepSeek -> Qwen fallback；运行产物写入 `/tmp/agent-buyer-real-llm-e2e/<timestamp>`；`progress.md` 记录踩坑与验证结果 | DONE | V22-GATE |
 | V2-ARCH-01 | 重排 package 架构 | `api/tool/llm/trajectory/subagent/skill/todo/business` 按职责拆分 package；不改变业务行为；新增 package architecture 文档；`mvn test` 与真实 LLM E2E 通过 | DONE | V2-E2E-01 |
+| V2-HITL-01 | 增强 human-in-the-loop 判断与缺槽追问 | 确认阶段先规则判断，规则不命中时调用 LLM 结构化分类；低置信/失败 fail closed 为追问；`cancel_order` 缺 `orderId` 进入 `PAUSED + user_input` 而不是普通工具失败；补单测与文档 | DONE | V2-ARCH-01 |
 
 ## 任务边界
 

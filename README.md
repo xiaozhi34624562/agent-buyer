@@ -101,8 +101,10 @@ persistence           MyBatis entity/mapper
 - 多实例 active run sweeper、Redis Pub/Sub tool result notification、500ms polling fallback
 - ToDo 工具：`todo_create`、`todo_write`，每 3 turn 向 provider view 注入 transient reminder
 - `ToolResultCloser` 统一闭合 precheck failure、timeout、abort、executor reject 等 synthetic tool result
-- `ConfirmationIntentService` 区分确认、拒绝和模糊输入，采用拒绝优先、疑问优先、确认收窄的写操作确认边界
+- `HumanIntentResolver` 先用规则判断高置信确认/拒绝；规则不命中时调用 LLM 做结构化语义判断，低置信或失败时 fail closed 为追问
 - 写操作 dry-run / confirmToken 二段式确认
+- confirmToken 绑定 `runId + userId + toolName + argsHash`
+- 工具缺少可补充参数时返回 recoverable precheck result，run 进入 `PAUSED` 并返回 `nextActionRequired=user_input`
 - MyBatis Plus 持久化与 Flyway 数据库迁移
 - 基于 `runId` 的完整 trajectory 查询
 - 限流、prompt injection 边界提示、PII 脱敏、密钥从环境变量读取

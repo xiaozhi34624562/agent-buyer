@@ -1,6 +1,7 @@
 package com.ai.agent.loop;
 
 import com.ai.agent.application.ConfirmationIntentService;
+import com.ai.agent.application.HumanIntentResolver;
 import com.ai.agent.application.RunAccessManager;
 import com.ai.agent.application.RunStateMachine;
 import com.ai.agent.budget.AgentExecutionBudget;
@@ -99,7 +100,11 @@ public final class AgentLoopTestFactory {
                 sinkRegistry,
                 runAccessManager,
                 turnOrchestrator,
-                new ConfirmationIntentService(),
+                new HumanIntentResolver(
+                        new ConfirmationIntentService(),
+                        (runId, userId, runContext, userMessage) ->
+                                HumanIntentResolver.ConfirmationDecision.clarify("请明确回复确认继续执行，或回复放弃本次操作。", "test")
+                ),
                 confirmTokenStore
         );
     }

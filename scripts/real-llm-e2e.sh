@@ -382,12 +382,13 @@ JSON
 {
   "message": {
     "role": "user",
-    "content": "确认取消这个订单"
+    "content": "没问题，按刚才的取消方案继续处理"
   }
 }
 JSON
   post_sse "${OUT_DIR}/order-confirm.sse" "${OUT_DIR}/order-confirm-request.json" "${ACTIVE_BASE_URL}/api/agent/runs/${run_id}/messages"
   summarize_sse "order-confirm" "${OUT_DIR}/order-confirm.sse" "${OUT_DIR}/order-confirm-summary.json" "SUCCEEDED" "cancel_order" 1
+  assert_positive_count "semantic confirmation event" "SELECT COUNT(*) FROM agent_event WHERE run_id = '${run_id}' AND event_type = 'confirmation_intent_llm'"
   get_json "${OUT_DIR}/order-trajectory.json" "${ACTIVE_BASE_URL}/api/agent/runs/${run_id}"
   assert_json_contains "${OUT_DIR}/order-trajectory.json" "query_order" "cancel_order" "SUCCEEDED"
   local status
@@ -530,7 +531,7 @@ run_skill_compact_case() {
   "messages": [
     {
       "role": "user",
-      "content": "/purchase-guide 请严格按顺序调用工具：先 skill_list；再分别调用 skill_view 读取 purchase-guide、return-exchange-guide、order-issue-support 的 SKILL.md；然后调用 query_order 查询最近7天订单；最后结合 skill 内容和订单结果用中文总结。"
+      "content": "/purchase-guide 请严格按顺序调用工具：先 skill_list；再分别调用 skill_view 读取 purchase-guide、return-exchange-guide、order-issue-support 的 SKILL.md；然后调用 query_order 查询最近7天订单；最后结合 skill 内容和订单结果用中文总结。每个 skill_view 只允许调用一次，query_order 只允许调用一次；如果历史里出现压缩摘要或占位符，不要重新读取或重新查询，直接基于已获得的信息总结。"
     }
   ],
   "allowedToolNames": ["skill_list", "skill_view", "query_order"],

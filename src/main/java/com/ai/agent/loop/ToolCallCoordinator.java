@@ -91,14 +91,21 @@ public final class ToolCallCoordinator {
         for (ToolCall call : commit.allCalls()) {
             sink.onToolUse(new ToolUseEvent(runId, call.toolUseId(), call.toolName(), call.argsJson()));
         }
-        closePrecheckFailures(runId, commit.precheckFailedCalls(), sink);
+        List<ToolTerminal> precheckTerminals = closePrecheckFailures(runId, commit.precheckFailedCalls(), sink);
 
         for (ToolCall valid : commit.executableCalls()) {
             toolRuntime.onToolUse(runId, valid);
         }
 
-        List<ToolTerminal> terminals = awaitAndCloseExecutableResults(runId, commit.executableCalls(), sink);
-        return new ToolStepResult(commit.allCalls(), commit.executableCalls(), terminals, findPendingConfirm(terminals));
+        List<ToolTerminal> terminals = new ArrayList<>(precheckTerminals);
+        terminals.addAll(awaitAndCloseExecutableResults(runId, commit.executableCalls(), sink));
+        return new ToolStepResult(
+                commit.allCalls(),
+                commit.executableCalls(),
+                terminals,
+                findPendingConfirm(terminals),
+                findPendingUserInput(terminals)
+        );
     }
 
     public List<ToolTerminal> abortRunTools(String runId, String reason, AgentEventSink sink) {
@@ -174,7 +181,8 @@ public final class ToolCallCoordinator {
         return timeout;
     }
 
-    private void closePrecheckFailures(String runId, List<ToolCall> precheckFailedCalls, AgentEventSink sink) {
+    private List<ToolTerminal> closePrecheckFailures(String runId, List<ToolCall> precheckFailedCalls, AgentEventSink sink) {
+        List<ToolTerminal> terminals = new ArrayList<>();
         for (ToolCall failed : precheckFailedCalls) {
             ToolTerminal terminal = new ToolTerminal(
                     failed.toolCallId(),
@@ -185,8 +193,10 @@ public final class ToolCallCoordinator {
                     true
             );
             toolResultCloser.closeTerminal(runId, failed, terminal, sink);
+            terminals.add(terminal);
             log.warn("tool precheck failed toolName={} toolUseId={}", failed.toolName(), failed.toolUseId());
         }
+        return terminals;
     }
 
     private ToolCommit commitAssistantToolCalls(
@@ -305,6 +315,42 @@ public final class ToolCallCoordinator {
         return null;
     }
 
+    private PendingUserInput findPendingUserInput(List<ToolTerminal> terminals) {
+        for (ToolTerminal terminal : terminals) {
+            PendingUserInput fromResult = pendingUserInputFromJson(terminal.resultJson());
+            if (fromResult != null) {
+                return fromResult;
+            }
+            PendingUserInput fromError = pendingUserInputFromJson(terminal.errorJson());
+            if (fromError != null) {
+                return fromError;
+            }
+        }
+        return null;
+    }
+
+    private PendingUserInput pendingUserInputFromJson(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(json);
+            if (!root.path("recoverable").asBoolean(false)) {
+                return null;
+            }
+            if (!"user_input".equals(root.path("nextActionRequired").asText(""))) {
+                return null;
+            }
+            String question = root.path("question").asText("");
+            if (question.isBlank()) {
+                question = root.path("message").asText("请补充必要信息后继续。");
+            }
+            return new PendingUserInput(question);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
     private String errorJson(String type, String message) {
         try {
             return objectMapper.writeValueAsString(new LinkedHashMap<>(Map.of(
@@ -320,11 +366,15 @@ public final class ToolCallCoordinator {
             List<ToolCall> allCalls,
             List<ToolCall> executableCalls,
             List<ToolTerminal> terminals,
-            PendingConfirm pendingConfirm
+            PendingConfirm pendingConfirm,
+            PendingUserInput pendingUserInput
     ) {
     }
 
     public record PendingConfirm(String summary) {
+    }
+
+    public record PendingUserInput(String question) {
     }
 
     public static final class ToolResultTimeoutException extends RuntimeException {

@@ -950,6 +950,32 @@ V2.2 必须在 `V21-GATE` 完成后启动。占位列表：
   - 本次真实 LLM E2E 产物：`/tmp/agent-buyer-real-llm-e2e/20260502-061204`。
 - 状态：`V2-ARCH-01` 完成，package 重排只改变导航结构，不改变 HTTP/API/tool schema/DB schema 行为。
 
+### Human-in-the-loop 语义确认与缺槽追问
+
+- 时间：2026-05-02 06:35 CST。
+- 背景：原确认阶段只靠 `ConfirmationIntentService` 中的硬编码规则判断，明确 yes/no 很稳，但对“没问题，就处理吧”这类长尾表达召回不足；同时 `cancel_order` 缺 `orderId` 只会变成普通 precheck failure，用户体验不够像对话。
+- 设计调整：
+  - 新增 `HumanIntentResolver`：规则先判；规则不命中时调用 `SemanticConfirmationIntentClassifier`；低置信、解析失败或 provider 失败统一 fail closed 为追问。
+  - 新增 `ProviderSemanticConfirmationIntentClassifier`：使用 run context 中的 primary provider，失败时按 run context fallback provider 兜底；要求 provider 只返回 `CONFIRM/REJECT/CLARIFY` JSON；分类调用写入 `agent_llm_attempt`，分类结果写入 `confirmation_intent_llm` event。
+  - 服务端安全边界不变：LLM 语义分类只决定是否继续对话，真实写操作仍必须通过 `confirmToken + argsHash + userId + runId + toolName` 校验。
+  - `cancel_order` 缺 `orderId` 时返回 recoverable precheck error，包含 `nextActionRequired=user_input` 和追问文本。
+  - `ToolCallCoordinator` 将 recoverable precheck result 汇总给 `AgentTurnOrchestrator`，后者把 run 置为 `PAUSED` 并通过 SSE final 追问用户。
+- 开发中踩坑：
+  - Spring 集成测试必须带 `MYSQL_PASSWORD`；不带密码会被误判为新增 bean wiring 失败。
+  - recoverable precheck failure 不能只 close synthetic tool result，还要作为 `ToolStepResult` 返回给 orchestrator，否则 loop 不知道该暂停追问。
+  - 测试中的 `messagesByRun` 不能放不可变 `List.of(...)`，因为 fake trajectory store 会继续 append assistant/tool message。
+  - 语义确认也是一次真实 provider 调用，不能只写业务 event；补充 `agent_llm_attempt` 写入后，排查 provider/fallback/usage 才不会断层。
+- 验证：
+  - `mvn -q -Dtest=com.ai.agent.application.HumanIntentResolverTest,com.ai.agent.application.ProviderSemanticConfirmationIntentClassifierTest,com.ai.agent.loop.AgentTurnOrchestratorBudgetTest test`：通过。
+  - `MYSQL_PASSWORD=*** mvn -q -Dtest=com.ai.agent.tool.builtin.order.CancelOrderToolIntegrationTest test`：通过。
+  - `MYSQL_PASSWORD=*** mvn test`：245 tests，0 failures，0 errors，BUILD SUCCESS。
+  - `scripts/real-llm-e2e.sh` 的订单确认文案改为非规则短语“没问题，按刚才的取消方案继续处理”，真实 provider 语义确认事件 `confirmation_intent_llm` 断言通过。
+  - `MYSQL_PASSWORD=*** DEEPSEEK_API_KEY=*** QWEN_API_KEY=*** ./scripts/real-llm-e2e.sh`：通过；覆盖订单取消、ToDo、SubAgent、interrupt、skill slash、三类 compact、DeepSeek -> Qwen fallback；产物 `/tmp/agent-buyer-real-llm-e2e/20260502-064705`。
+- 真实 E2E 新踩坑：
+  - compact 模式低阈值会把旧 skill tool result 压成占位符/summary，真实模型可能误以为“技能内容被截断”，反复重新 `skill_view`，最后触发 `max turns exceeded`。
+  - 修复方式不是放大 `maxTurns`，而是把 E2E 指令收紧为每个 `skill_view` / `query_order` 只调用一次，并明确看到压缩摘要或占位符时不要重新读取；这样仍能验证三类 compact 落库，同时避免测试 prompt 与 compact 机制互相拉扯。
+- 状态：`V2-HITL-01` 完成。
+
 ## V2 踩坑记录
 
 - Flyway 已应用的 migration 不要回改 checksum；本次 V8 已在本地 DB 应用后需要补字段，正确做法是保留 V8、追加 V8_1 幂等迁移。

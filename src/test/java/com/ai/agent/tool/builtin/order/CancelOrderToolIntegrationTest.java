@@ -14,6 +14,7 @@ import com.ai.agent.tool.model.CancelReason;
 import com.ai.agent.tool.model.StartedTool;
 import com.ai.agent.tool.model.ToolCall;
 import com.ai.agent.tool.core.ToolExecutionContext;
+import com.ai.agent.tool.core.ToolValidation;
 import com.ai.agent.tool.model.ToolStatus;
 import com.ai.agent.tool.model.ToolTerminal;
 import com.ai.agent.tool.model.ToolUse;
@@ -46,6 +47,21 @@ class CancelOrderToolIntegrationTest {
 
     @Autowired
     ObjectMapper objectMapper;
+
+    @Test
+    void missingOrderIdValidationIsRecoverableUserInputRequest() throws Exception {
+        ToolValidation validation = tool.validate(
+                new ToolUseContext("run-1", "demo-user"),
+                new ToolUse("call-1", "cancel_order", "{}")
+        );
+
+        assertThat(validation.accepted()).isFalse();
+        JsonNode error = objectMapper.readTree(validation.errorJson());
+        assertThat(error.path("type").asText()).isEqualTo("missing_order_id");
+        assertThat(error.path("recoverable").asBoolean()).isTrue();
+        assertThat(error.path("nextActionRequired").asText()).isEqualTo("user_input");
+        assertThat(error.path("question").asText()).contains("订单号");
+    }
 
     @Test
     void confirmTokenRejectsChangedArgumentsBeforeAllowingOriginalArguments() throws Exception {

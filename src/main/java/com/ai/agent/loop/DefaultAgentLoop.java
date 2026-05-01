@@ -1,6 +1,6 @@
 package com.ai.agent.loop;
 
-import com.ai.agent.application.ConfirmationIntentService;
+import com.ai.agent.application.HumanIntentResolver;
 import com.ai.agent.application.RunAccessManager;
 import com.ai.agent.application.RunStateMachine;
 import com.ai.agent.config.AgentProperties;
@@ -50,7 +50,7 @@ public final class DefaultAgentLoop implements AgentLoop {
     private final RunAccessManager runAccessManager;
     private final RunStateMachine stateMachine;
     private final AgentTurnOrchestrator turnOrchestrator;
-    private final ConfirmationIntentService confirmationIntentService;
+    private final HumanIntentResolver humanIntentResolver;
     private final ConfirmTokenStore confirmTokenStore;
 
     @Autowired
@@ -63,7 +63,7 @@ public final class DefaultAgentLoop implements AgentLoop {
             RunEventSinkRegistry sinkRegistry,
             RunAccessManager runAccessManager,
             AgentTurnOrchestrator turnOrchestrator,
-            ConfirmationIntentService confirmationIntentService,
+            HumanIntentResolver humanIntentResolver,
             ConfirmTokenStore confirmTokenStore
     ) {
         this.properties = properties;
@@ -75,7 +75,7 @@ public final class DefaultAgentLoop implements AgentLoop {
         this.runAccessManager = runAccessManager;
         this.stateMachine = new RunStateMachine(trajectoryStore);
         this.turnOrchestrator = turnOrchestrator;
-        this.confirmationIntentService = confirmationIntentService;
+        this.humanIntentResolver = humanIntentResolver;
         this.confirmTokenStore = confirmTokenStore;
     }
 
@@ -164,8 +164,13 @@ public final class DefaultAgentLoop implements AgentLoop {
                 runAccessManager.restoreWaitingAfterContinuationStartFailure(permit);
                 throw e;
             }
-            ConfirmationIntentService.ConfirmationIntent confirmationIntent = confirmationIntentService.classify(message.content());
-            if (confirmationIntent == ConfirmationIntentService.ConfirmationIntent.REJECT) {
+            HumanIntentResolver.ConfirmationDecision confirmationDecision = humanIntentResolver.resolveConfirmation(
+                    runId,
+                    userId,
+                    runContext,
+                    message.content()
+            );
+            if (confirmationDecision.intent() == HumanIntentResolver.ConfirmationIntent.REJECT) {
                 confirmTokenStore.clearRun(runId);
                 String finalText = "已取消本次操作，订单未被更改。";
                 trajectoryStore.appendMessage(runId, LlmMessage.assistant(Ids.newId("msg"), finalText, List.of()));
@@ -177,8 +182,10 @@ public final class DefaultAgentLoop implements AgentLoop {
                 log.info("agent continuation completed by user rejection");
                 return terminal;
             }
-            if (confirmationIntent == ConfirmationIntentService.ConfirmationIntent.AMBIGUOUS) {
-                String finalText = "请明确回复确认取消或放弃操作。";
+            if (confirmationDecision.intent() == HumanIntentResolver.ConfirmationIntent.CLARIFY) {
+                String finalText = confirmationDecision.question() == null || confirmationDecision.question().isBlank()
+                        ? "请明确回复确认继续执行，或回复放弃本次操作。"
+                        : confirmationDecision.question();
                 trajectoryStore.appendMessage(runId, LlmMessage.assistant(Ids.newId("msg"), finalText, List.of()));
                 AgentRunResult waiting = transitionTerminal(runId, RunStatus.WAITING_USER_CONFIRMATION, null, finalText);
                 if (waiting.status() != RunStatus.WAITING_USER_CONFIRMATION) {
