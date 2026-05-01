@@ -170,6 +170,80 @@ class RedisToolStoreIntegrationTest {
         }
     }
 
+    @Test
+    void abortCancelsWaitingButLetsRunningNonIdempotentToolRecordActualResult() {
+        String runId = Ids.newId("test_run");
+        try {
+            ToolCall runningCall = call(runId, 1, "cancel_order", false, false);
+            ToolCall waitingCall = call(runId, 2, "query_order", true, true);
+
+            assertThat(store.ingestWaiting(runId, runningCall)).isTrue();
+            assertThat(store.ingestWaiting(runId, waitingCall)).isTrue();
+            StartedTool running = store.schedule(runId).getFirst();
+
+            List<ToolTerminal> cancelled = store.abort(runId, "user_abort");
+
+            assertThat(store.abortRequested(runId)).isTrue();
+            assertThat(cancelled).extracting(ToolTerminal::toolCallId)
+                    .containsExactly(waitingCall.toolCallId());
+            assertThat(store.schedule(runId)).isEmpty();
+            assertThat(store.complete(running, ToolTerminal.succeeded(running.call().toolCallId(), "{}"))).isTrue();
+            assertThat(store.terminal(runId, runningCall.toolCallId())).get()
+                    .satisfies(terminal -> {
+                        assertThat(terminal.status()).isEqualTo(ToolStatus.SUCCEEDED);
+                        assertThat(terminal.synthetic()).isFalse();
+                    });
+        } finally {
+            cleanup(runId);
+        }
+    }
+
+    @Test
+    void abortCancelsRunningIdempotentToolAndRejectsLateSuccessComplete() {
+        String runId = Ids.newId("test_run");
+        try {
+            ToolCall runningCall = call(runId, 1, "query_order", true, true);
+
+            assertThat(store.ingestWaiting(runId, runningCall)).isTrue();
+            StartedTool running = store.schedule(runId).getFirst();
+
+            List<ToolTerminal> cancelled = store.abort(runId, "user_abort");
+
+            assertThat(cancelled).extracting(ToolTerminal::toolCallId)
+                    .containsExactly(runningCall.toolCallId());
+            assertThat(store.complete(running, ToolTerminal.succeeded(running.call().toolCallId(), "{}"))).isFalse();
+            assertThat(store.terminal(runId, runningCall.toolCallId())).get()
+                    .satisfies(terminal -> {
+                        assertThat(terminal.status()).isEqualTo(ToolStatus.CANCELLED);
+                        assertThat(terminal.cancelReason()).isEqualTo(CancelReason.USER_ABORT);
+                        assertThat(terminal.synthetic()).isTrue();
+                    });
+        } finally {
+            cleanup(runId);
+        }
+    }
+
+    @Test
+    void ingestAfterAbortCreatesSyntheticTerminalInsteadOfWaitingForever() {
+        String runId = Ids.newId("test_run");
+        try {
+            ToolCall postAbort = call(runId, 1, "query_order", true, true);
+
+            assertThat(store.abort(runId, "user_abort")).isEmpty();
+            assertThat(store.ingestWaiting(runId, postAbort)).isTrue();
+
+            assertThat(store.schedule(runId)).isEmpty();
+            assertThat(store.terminal(runId, postAbort.toolCallId())).get()
+                    .satisfies(terminal -> {
+                        assertThat(terminal.status()).isEqualTo(ToolStatus.CANCELLED);
+                        assertThat(terminal.cancelReason()).isEqualTo(CancelReason.RUN_ABORTED);
+                        assertThat(terminal.synthetic()).isTrue();
+                    });
+        } finally {
+            cleanup(runId);
+        }
+    }
+
     private ToolCall call(String runId, long seq, String toolName, boolean concurrent, boolean idempotent) {
         return new ToolCall(
                 runId,

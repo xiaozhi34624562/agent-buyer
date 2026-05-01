@@ -24,5 +24,7 @@ public interface RedisToolStore {
 
     Set<String> activeRunIds();
 
-    void abort(String runId, String reason);
+    List<ToolTerminal> abort(String runId, String reason);
+
+    boolean abortRequested(String runId);
 }

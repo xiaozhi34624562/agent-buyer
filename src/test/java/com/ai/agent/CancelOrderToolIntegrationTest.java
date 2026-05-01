@@ -11,6 +11,7 @@ import com.ai.agent.business.OrderStatus;
 import com.ai.agent.persistence.entity.BusinessOrderEntity;
 import com.ai.agent.persistence.mapper.BusinessOrderMapper;
 import com.ai.agent.tool.CancelOrderTool;
+import com.ai.agent.tool.CancelReason;
 import com.ai.agent.tool.StartedTool;
 import com.ai.agent.tool.ToolCall;
 import com.ai.agent.tool.ToolExecutionContext;
@@ -121,6 +122,35 @@ class CancelOrderToolIntegrationTest {
                     () -> false
             );
             assertThat(newTokenResult.status()).isEqualTo(ToolStatus.SUCCEEDED);
+        } finally {
+            redisTemplate.delete("agent:{run:" + runId + "}:confirm-tokens");
+        }
+    }
+
+    @Test
+    void cancellationTokenStopsConfirmedCancelBeforeBusinessSideEffect() throws Exception {
+        String runId = Ids.newId("test_run");
+        String orderId = Ids.newId("O_TEST");
+        try {
+            insertPaidOrder(orderId);
+
+            ToolTerminal dryRun = tool.run(
+                    new ToolExecutionContext(runId, "demo-user", NoopSink.INSTANCE),
+                    started(runId, orderId, null),
+                    () -> false
+            );
+            String confirmToken = objectMapper.readTree(dryRun.resultJson()).path("confirmToken").asText();
+
+            ToolTerminal cancelled = tool.run(
+                    new ToolExecutionContext(runId, "demo-user", NoopSink.INSTANCE),
+                    started(runId, orderId, confirmToken),
+                    () -> true
+            );
+
+            assertThat(cancelled.status()).isEqualTo(ToolStatus.CANCELLED);
+            assertThat(cancelled.cancelReason()).isEqualTo(CancelReason.RUN_ABORTED);
+            assertThat(cancelled.synthetic()).isTrue();
+            assertThat(orderMapper.selectById(orderId).getStatus()).isEqualTo(OrderStatus.PAID.name());
         } finally {
             redisTemplate.delete("agent:{run:" + runId + "}:confirm-tokens");
         }

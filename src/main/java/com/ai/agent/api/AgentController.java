@@ -1,9 +1,10 @@
 package com.ai.agent.api;
 
-import com.ai.agent.trajectory.TrajectoryStore;
-import com.ai.agent.domain.RunStatus;
-import com.ai.agent.tool.redis.RedisToolStore;
+import com.ai.agent.trajectory.dto.AgentRunTrajectoryDto;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -15,110 +16,104 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.function.Consumer;
 
 @RestController
 @RequestMapping("/api/agent")
 public class AgentController {
-    private final AgentLoop agentLoop;
-    private final RunAdmissionController admissionController;
-    private final RedisRateLimiter rateLimiter;
-    private final ContinuationLockService continuationLockService;
-    private final TrajectoryStore trajectoryStore;
+    private static final Logger log = LoggerFactory.getLogger(AgentController.class);
+
+    private final AgentRunApplicationService applicationService;
     private final ExecutorService agentExecutor;
     private final ScheduledExecutorService sseScheduler;
-    private final RedisToolStore redisToolStore;
     private final SseMetrics sseMetrics;
     private final AgentEventRecorder eventRecorder;
 
     public AgentController(
-            AgentLoop agentLoop,
-            RunAdmissionController admissionController,
-            RedisRateLimiter rateLimiter,
-            ContinuationLockService continuationLockService,
-            TrajectoryStore trajectoryStore,
+            AgentRunApplicationService applicationService,
             @Qualifier("agentExecutor") ExecutorService agentExecutor,
             @Qualifier("sseScheduler") ScheduledExecutorService sseScheduler,
-            RedisToolStore redisToolStore,
             SseMetrics sseMetrics,
             AgentEventRecorder eventRecorder
     ) {
-        this.agentLoop = agentLoop;
-        this.admissionController = admissionController;
-        this.rateLimiter = rateLimiter;
-        this.continuationLockService = continuationLockService;
-        this.trajectoryStore = trajectoryStore;
+        this.applicationService = applicationService;
         this.agentExecutor = agentExecutor;
         this.sseScheduler = sseScheduler;
-        this.redisToolStore = redisToolStore;
         this.sseMetrics = sseMetrics;
         this.eventRecorder = eventRecorder;
     }
 
     @PostMapping(value = "/runs", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter createRun(
-            @RequestHeader(value = "X-User-Id", defaultValue = "demo-user") String userId,
+            @RequestHeader("X-User-Id") String userId,
             @Valid @RequestBody AgentRunRequest request
     ) {
-        if (!admissionController.isAccepting()) {
-            throw new ServiceUnavailableException();
-        }
-        if (!rateLimiter.allowRun(userId)) {
-            throw new RateLimitExceededException();
-        }
-        return submitSse(sink -> agentLoop.run(userId, request, sink));
+        return submitSse(applicationService.createRun(requiredUserId(userId), request));
     }
 
     @PostMapping(value = "/runs/{runId}/messages", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter continueRun(
-            @RequestHeader(value = "X-User-Id", defaultValue = "demo-user") String userId,
+            @RequestHeader("X-User-Id") String userId,
             @PathVariable String runId,
             @Valid @RequestBody ContinueRunRequest request
     ) {
-        if (!admissionController.isAccepting()) {
-            throw new ServiceUnavailableException();
-        }
-        return submitSse(sink -> agentLoop.continueRun(userId, runId, request.message(), sink));
+        return submitSse(applicationService.continueRun(requiredUserId(userId), runId, request));
     }
 
     @GetMapping("/runs/{runId}")
-    public Map<String, Object> getRun(@PathVariable String runId) {
-        return trajectoryStore.loadTrajectory(runId);
+    public AgentRunTrajectoryDto getRun(
+            @RequestHeader("X-User-Id") String userId,
+            @PathVariable String runId
+    ) {
+        return applicationService.queryRun(requiredUserId(userId), runId);
     }
 
     @PostMapping("/runs/{runId}/abort")
-    public Map<String, Object> abortRun(
-            @RequestHeader(value = "X-User-Id", defaultValue = "demo-user") String userId,
+    public AgentRunApplicationService.AbortRunResponse abortRun(
+            @RequestHeader("X-User-Id") String userId,
             @PathVariable String runId
     ) {
-        if (!userId.equals(trajectoryStore.findRunUserId(runId))) {
-            throw new IllegalArgumentException("run does not belong to current user");
-        }
-        redisToolStore.abort(runId, "user_abort");
-        continuationLockService.releaseRun(runId);
-        trajectoryStore.updateRunStatus(runId, RunStatus.CANCELLED, "user_abort");
-        return Map.of("runId", runId, "status", RunStatus.CANCELLED);
+        return applicationService.abortRun(requiredUserId(userId), runId);
     }
 
-    private SseEmitter submitSse(Consumer<AgentEventSink> action) {
+    private String requiredUserId(String userId) {
+        if (userId == null || userId.isBlank()) {
+            throw new AuthenticationRequiredException();
+        }
+        return userId.trim();
+    }
+
+    private SseEmitter submitSse(AgentRunApplicationService.RunStreamPlan plan) {
         SseEmitter emitter = new SseEmitter(310_000L);
         SseAgentEventSink sseSink = new SseAgentEventSink(emitter, sseScheduler, sseMetrics);
         AgentEventSink sink = new RecordingAgentEventSink(sseSink, eventRecorder);
-        agentExecutor.submit(() -> {
-            try {
-                action.accept(sink);
-            } catch (Exception e) {
-                safeError(sink, e);
-            } finally {
-                sseSink.close();
-                emitter.complete();
-            }
-        });
+        Map<String, String> parentMdc = MDC.getCopyOfContextMap();
+        try {
+            agentExecutor.submit(() -> runWithMdc(parentMdc, () -> {
+                try {
+                    plan.action().run(sink);
+                } catch (Exception e) {
+                    log.error("agent request failed", e);
+                    safeError(sink, e);
+                } finally {
+                    sseSink.close();
+                    emitter.complete();
+                }
+            }));
+        } catch (RejectedExecutionException e) {
+            log.error("agent request rejected by executor", e);
+            plan.onExecutorRejected().run();
+            safeError(sink, e);
+            sseSink.close();
+            emitter.completeWithError(e);
+            throw e;
+        }
         return emitter;
     }
 
@@ -127,24 +122,79 @@ public class AgentController {
             sink.onError(new ErrorEvent(null, e.getMessage()));
         } catch (Exception ignored) {
             // The client may already be disconnected.
+            log.debug("failed to send error event because client is gone", ignored);
         }
     }
 
-    @org.springframework.web.bind.annotation.ExceptionHandler(RateLimitExceededException.class)
+    private void runWithMdc(Map<String, String> context, Runnable task) {
+        Map<String, String> previous = MDC.getCopyOfContextMap();
+        try {
+            if (context == null || context.isEmpty()) {
+                MDC.clear();
+            } else {
+                MDC.setContextMap(context);
+            }
+            task.run();
+        } finally {
+            if (previous == null || previous.isEmpty()) {
+                MDC.clear();
+            } else {
+                MDC.setContextMap(previous);
+            }
+        }
+    }
+
+    @org.springframework.web.bind.annotation.ExceptionHandler(AgentRunApplicationService.RateLimitExceededException.class)
     public ResponseEntity<Map<String, String>> rateLimited() {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .body(Map.of("message", "rate limit exceeded"));
     }
 
-    @org.springframework.web.bind.annotation.ExceptionHandler(ServiceUnavailableException.class)
+    @org.springframework.web.bind.annotation.ExceptionHandler(AgentRunApplicationService.ServiceUnavailableException.class)
     public ResponseEntity<Map<String, String>> unavailable() {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(Map.of("message", "agent is shutting down"));
     }
 
-    private static final class RateLimitExceededException extends RuntimeException {
+    @org.springframework.web.bind.annotation.ExceptionHandler(AgentRequestPolicy.InvalidAgentRequestException.class)
+    public ResponseEntity<Map<String, String>> invalidAgentRequest(AgentRequestPolicy.InvalidAgentRequestException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Map.of("message", e.getMessage()));
     }
 
-    private static final class ServiceUnavailableException extends RuntimeException {
+    @org.springframework.web.bind.annotation.ExceptionHandler({
+            MissingRequestHeaderException.class,
+            AuthenticationRequiredException.class
+    })
+    public ResponseEntity<Map<String, String>> authenticationRequired() {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Map.of("message", "authenticated user is required"));
+    }
+
+    @org.springframework.web.bind.annotation.ExceptionHandler(RunAccessManager.RunAccessDeniedException.class)
+    public ResponseEntity<Map<String, String>> accessDenied() {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(Map.of("message", "run access denied"));
+    }
+
+    @org.springframework.web.bind.annotation.ExceptionHandler(RunAccessManager.RunNotFoundException.class)
+    public ResponseEntity<Map<String, String>> runNotFound() {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(Map.of("message", "run not found"));
+    }
+
+    @org.springframework.web.bind.annotation.ExceptionHandler(RunAccessManager.RunContinuationNotAllowedException.class)
+    public ResponseEntity<Map<String, String>> continuationNotAllowed() {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(Map.of("message", "run is not waiting for continuation"));
+    }
+
+    @org.springframework.web.bind.annotation.ExceptionHandler(RunAccessManager.RunContinuationLockedException.class)
+    public ResponseEntity<Map<String, String>> continuationLocked() {
+        return ResponseEntity.status(HttpStatus.LOCKED)
+                .body(Map.of("message", "run continuation is already in progress"));
+    }
+
+    private static final class AuthenticationRequiredException extends RuntimeException {
     }
 }

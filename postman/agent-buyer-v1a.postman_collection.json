@@ -1,0 +1,622 @@
+{
+  "info": {
+    "_postman_id": "7eb77a58-1bb2-4e0b-85e1-agent-buyer-v1a",
+    "name": "agent-buyer V1a",
+    "description": "Postman collection for validating agent-buyer V1a: health, SSE agent loop, dry-run confirmation, trajectory, abort, and metrics.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8080",
+      "type": "string"
+    },
+    {
+      "key": "userId",
+      "value": "demo-user",
+      "type": "string"
+    },
+    {
+      "key": "runId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "rejectRunId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "01 Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/actuator/health",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "actuator",
+            "health"
+          ]
+        },
+        "description": "验证 Spring Boot 应用是否在线。预期返回 {\"status\":\"UP\"}。"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('health is UP', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const json = pm.response.json();",
+              "  pm.expect(json.status).to.eql('UP');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 Create Run - Cancel Yesterday Order",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "text/event-stream"
+          },
+          {
+            "key": "X-User-Id",
+            "value": "{{userId}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"取消我昨天的那个订单。请先查询订单，如果需要确认，请给出确认摘要。\"\n    }\n  ],\n  \"allowedToolNames\": [\"query_order\", \"cancel_order\"],\n  \"llmParams\": {\n    \"model\": \"deepseek-reasoner\",\n    \"temperature\": 0.2,\n    \"maxTokens\": 4096\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/agent/runs",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "agent",
+            "runs"
+          ]
+        },
+        "description": "创建一个取消订单 run。预期 SSE 中出现 query_order、cancel_order dry-run，并最终进入 WAITING_USER_CONFIRMATION。Tests 会自动提取 runId 保存到 collection variable。"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('create run request accepted', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.text();",
+              "const runMatches = [...body.matchAll(/\"runId\"\\s*:\\s*\"([^\"]+)\"/g)];",
+              "if (runMatches.length > 0) {",
+              "  const runId = runMatches[runMatches.length - 1][1];",
+              "  pm.collectionVariables.set('runId', runId);",
+              "  console.log('Captured runId:', runId);",
+              "}",
+              "",
+              "pm.test('captured runId from SSE', function () {",
+              "  pm.expect(pm.collectionVariables.get('runId')).to.not.be.empty;",
+              "});",
+              "",
+              "pm.test('SSE includes tool_use/tool_result/final', function () {",
+              "  pm.expect(body).to.include('event:tool_use');",
+              "  pm.expect(body).to.include('event:tool_result');",
+              "  pm.expect(body).to.include('event:final');",
+              "});",
+              "",
+              "pm.test('run waits for user confirmation', function () {",
+              "  pm.expect(body).to.include('WAITING_USER_CONFIRMATION');",
+              "  pm.expect(body).to.include('user_confirmation');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 Continue Run - Confirm Cancel",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "text/event-stream"
+          },
+          {
+            "key": "X-User-Id",
+            "value": "{{userId}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": {\n    \"role\": \"user\",\n    \"content\": \"确认取消这个订单\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/agent/runs/{{runId}}/messages",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "agent",
+            "runs",
+            "{{runId}}",
+            "messages"
+          ]
+        },
+        "description": "确认取消订单。预期 SSE 中再次调用 cancel_order，并最终 SUCCEEDED。"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('continue request accepted', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.text();",
+              "",
+              "pm.test('SSE includes final success', function () {",
+              "  pm.expect(body).to.include('event:final');",
+              "  pm.expect(body).to.include('SUCCEEDED');",
+              "});",
+              "",
+              "pm.test('tool result says order cancelled', function () {",
+              "  pm.expect(body).to.include('CANCELLED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 Get Trajectory",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-User-Id",
+            "value": "{{userId}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/agent/runs/{{runId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "agent",
+            "runs",
+            "{{runId}}"
+          ]
+        },
+        "description": "查询完整 trajectory。预期包含 run、messages、llmAttempts、toolCalls、toolResults、events、toolProgress。"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('trajectory response is OK', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const json = pm.response.json();",
+              "",
+              "pm.test('trajectory has core sections', function () {",
+              "  pm.expect(json).to.have.property('run');",
+              "  pm.expect(json).to.have.property('messages');",
+              "  pm.expect(json).to.have.property('llmAttempts');",
+              "  pm.expect(json).to.have.property('toolCalls');",
+              "  pm.expect(json).to.have.property('toolResults');",
+              "  pm.expect(json).to.have.property('events');",
+              "  pm.expect(json).to.have.property('toolProgress');",
+              "});",
+              "",
+              "pm.test('run reached terminal status', function () {",
+              "  pm.expect(['SUCCEEDED', 'WAITING_USER_CONFIRMATION', 'FAILED', 'TIMEOUT', 'CANCELLED']).to.include(json.run.status);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 Create Run - User Reject Scenario",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "text/event-stream"
+          },
+          {
+            "key": "X-User-Id",
+            "value": "{{userId}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"取消我昨天的那个订单。先给我确认摘要。\"\n    }\n  ],\n  \"allowedToolNames\": [\"query_order\", \"cancel_order\"],\n  \"llmParams\": {\n    \"model\": \"deepseek-reasoner\",\n    \"temperature\": 0.2,\n    \"maxTokens\": 4096\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/agent/runs",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "agent",
+            "runs"
+          ]
+        },
+        "description": "创建一个用于验证“用户拒绝确认”的 run。Tests 会把 runId 保存到 rejectRunId。"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('reject scenario create request accepted', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.text();",
+              "const runMatches = [...body.matchAll(/\"runId\"\\s*:\\s*\"([^\"]+)\"/g)];",
+              "if (runMatches.length > 0) {",
+              "  const runId = runMatches[runMatches.length - 1][1];",
+              "  pm.collectionVariables.set('rejectRunId', runId);",
+              "  console.log('Captured rejectRunId:', runId);",
+              "}",
+              "",
+              "pm.test('captured rejectRunId from SSE', function () {",
+              "  pm.expect(pm.collectionVariables.get('rejectRunId')).to.not.be.empty;",
+              "});",
+              "",
+              "pm.test('reject scenario waits for confirmation', function () {",
+              "  pm.expect(body).to.include('WAITING_USER_CONFIRMATION');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 Continue Run - Reject Cancel",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "text/event-stream"
+          },
+          {
+            "key": "X-User-Id",
+            "value": "{{userId}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": {\n    \"role\": \"user\",\n    \"content\": \"算了，不取消了\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/agent/runs/{{rejectRunId}}/messages",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "agent",
+            "runs",
+            "{{rejectRunId}}",
+            "messages"
+          ]
+        },
+        "description": "用户拒绝确认取消。预期 run 以 SUCCEEDED 结束，但订单不会被取消。"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('reject continuation accepted', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.text();",
+              "",
+              "pm.test('reject flow returns final success', function () {",
+              "  pm.expect(body).to.include('event:final');",
+              "  pm.expect(body).to.include('SUCCEEDED');",
+              "});",
+              "",
+              "pm.test('reject flow says not changed', function () {",
+              "  pm.expect(body).to.include('订单未被更改');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 Create Run - Query Only Permission",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "text/event-stream"
+          },
+          {
+            "key": "X-User-Id",
+            "value": "{{userId}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"取消我昨天的那个订单\"\n    }\n  ],\n  \"allowedToolNames\": [\"query_order\"],\n  \"llmParams\": {\n    \"model\": \"deepseek-reasoner\",\n    \"temperature\": 0.2,\n    \"maxTokens\": 4096\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/agent/runs",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "agent",
+            "runs"
+          ]
+        },
+        "description": "验证工具权限收窄。只允许 query_order 时，模型不应该真正执行 cancel_order。"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('query-only request completed at HTTP level', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.text();",
+              "",
+              "pm.test('query-only run does not expose cancel_order tool_use event', function () {",
+              "  pm.expect(body).to.not.include('\"toolName\":\"cancel_order\"');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 Abort Run",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-User-Id",
+            "value": "{{userId}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/agent/runs/{{runId}}/abort",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "agent",
+            "runs",
+            "{{runId}}",
+            "abort"
+          ]
+        },
+        "description": "取消指定 run。abort 只对 active run 生效；如果 run 已经 SUCCEEDED/FAILED/TIMEOUT/CANCELLED，会返回原状态且 changed=false。"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('abort request is stable for terminal or active run', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const json = pm.response.json();",
+              "  pm.expect(['CANCELLED', 'SUCCEEDED', 'FAILED', 'TIMEOUT', 'WAITING_USER_CONFIRMATION']).to.include(json.status);",
+              "  pm.expect(json).to.have.property('changed');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 Get Trajectory - Forbidden User",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-User-Id",
+            "value": "intruder-user"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/agent/runs/{{runId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "agent",
+            "runs",
+            "{{runId}}"
+          ]
+        },
+        "description": "负向验证：其他用户不能查询当前 run 的 trajectory，预期 403。"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('trajectory is forbidden for another user', function () {",
+              "  pm.response.to.have.status(403);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 Create Run - Invalid Model",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "text/event-stream"
+          },
+          {
+            "key": "X-User-Id",
+            "value": "{{userId}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"查询我的订单\"\n    }\n  ],\n  \"allowedToolNames\": [\"query_order\"],\n  \"llmParams\": {\n    \"model\": \"not-allowed-model\",\n    \"temperature\": 0.2,\n    \"maxTokens\": 4096\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/agent/runs",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "agent",
+            "runs"
+          ]
+        },
+        "description": "负向验证：请求模型不在白名单时，AgentRequestPolicy 返回 400。"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('invalid model is rejected', function () {",
+              "  pm.response.to.have.status(400);",
+              "  pm.expect(pm.response.text()).to.include('model is not allowed');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11 Prometheus Metrics",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/actuator/prometheus",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "actuator",
+            "prometheus"
+          ]
+        },
+        "description": "查看 Prometheus 指标，例如 agent_active_runs、agent_sse_connections_active、agent_sse_events_sent_total。"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('prometheus endpoint is OK', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.text();",
+              "pm.test('agent metrics are exposed', function () {",
+              "  pm.expect(body).to.include('agent_active_runs');",
+              "  pm.expect(body).to.include('agent_sse_connections_active');",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ]
+}

@@ -3,10 +3,12 @@ package com.ai.agent.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.Duration;
+import java.util.List;
 
 @ConfigurationProperties(prefix = "agent")
 public class AgentProperties {
     private String redisKeyPrefix = "agent";
+    private List<String> defaultAllowedTools = List.of("query_order", "cancel_order");
     private int maxParallel = 6;
     private int maxScan = 256;
     private long leaseMs = 90_000;
@@ -16,6 +18,7 @@ public class AgentProperties {
     private Executor executor = new Executor();
     private Llm llm = new Llm();
     private RateLimit rateLimit = new RateLimit();
+    private RequestPolicy requestPolicy = new RequestPolicy();
 
     public String getRedisKeyPrefix() {
         return redisKeyPrefix;
@@ -23,6 +26,14 @@ public class AgentProperties {
 
     public void setRedisKeyPrefix(String redisKeyPrefix) {
         this.redisKeyPrefix = redisKeyPrefix;
+    }
+
+    public List<String> getDefaultAllowedTools() {
+        return defaultAllowedTools;
+    }
+
+    public void setDefaultAllowedTools(List<String> defaultAllowedTools) {
+        this.defaultAllowedTools = defaultAllowedTools == null ? List.of() : List.copyOf(defaultAllowedTools);
     }
 
     public int getMaxParallel() {
@@ -95,6 +106,14 @@ public class AgentProperties {
 
     public void setRateLimit(RateLimit rateLimit) {
         this.rateLimit = rateLimit;
+    }
+
+    public RequestPolicy getRequestPolicy() {
+        return requestPolicy;
+    }
+
+    public void setRequestPolicy(RequestPolicy requestPolicy) {
+        this.requestPolicy = requestPolicy;
     }
 
     public static class AgentLoop {
@@ -267,4 +286,98 @@ public class AgentProperties {
             this.tokensPerUserPerDay = tokensPerUserPerDay;
         }
     }
+
+    public static class RequestPolicy {
+        private int maxMessages = 20;
+        private int maxContentChars = 16_000;
+        private int maxTotalContentChars = 50_000;
+        private double minTemperature = 0.0;
+        private double maxTemperature = 2.0;
+        private int minMaxTokens = 1;
+        private int maxMaxTokens = 30_000;
+        private int minMaxTurns = 1;
+        private int maxMaxTurns = 10;
+        private List<String> allowedModels = List.of("deepseek-reasoner", "deepseek-chat");
+
+        public int getMaxMessages() {
+            return maxMessages;
+        }
+
+        public void setMaxMessages(int maxMessages) {
+            this.maxMessages = maxMessages;
+        }
+
+        public int getMaxContentChars() {
+            return maxContentChars;
+        }
+
+        public void setMaxContentChars(int maxContentChars) {
+            this.maxContentChars = maxContentChars;
+        }
+
+        public int getMaxTotalContentChars() {
+            return maxTotalContentChars;
+        }
+
+        public void setMaxTotalContentChars(int maxTotalContentChars) {
+            this.maxTotalContentChars = maxTotalContentChars;
+        }
+
+        public double getMinTemperature() {
+            return minTemperature;
+        }
+
+        public void setMinTemperature(double minTemperature) {
+            this.minTemperature = minTemperature;
+        }
+
+        public double getMaxTemperature() {
+            return maxTemperature;
+        }
+
+        public void setMaxTemperature(double maxTemperature) {
+            this.maxTemperature = maxTemperature;
+        }
+
+        public int getMinMaxTokens() {
+            return minMaxTokens;
+        }
+
+        public void setMinMaxTokens(int minMaxTokens) {
+            this.minMaxTokens = minMaxTokens;
+        }
+
+        public int getMaxMaxTokens() {
+            return maxMaxTokens;
+        }
+
+        public void setMaxMaxTokens(int maxMaxTokens) {
+            this.maxMaxTokens = maxMaxTokens;
+        }
+
+        public int getMinMaxTurns() {
+            return minMaxTurns;
+        }
+
+        public void setMinMaxTurns(int minMaxTurns) {
+            this.minMaxTurns = minMaxTurns;
+        }
+
+        public int getMaxMaxTurns() {
+            return maxMaxTurns;
+        }
+
+        public void setMaxMaxTurns(int maxMaxTurns) {
+            this.maxMaxTurns = maxMaxTurns;
+        }
+
+        public List<String> getAllowedModels() {
+            return allowedModels;
+        }
+
+        public void setAllowedModels(List<String> allowedModels) {
+            this.allowedModels = allowedModels == null ? List.of() : List.copyOf(allowedModels);
+        }
+    }
+
 }

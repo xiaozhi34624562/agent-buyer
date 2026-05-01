@@ -86,6 +86,9 @@ public final class CancelOrderTool extends AbstractTool {
     ) throws JsonProcessingException {
         CancelArgs args = objectMapper.readValue(normalizedArgsJson, CancelArgs.class);
         ctx.sink().onToolProgress(new com.ai.agent.api.ToolProgressEvent(ctx.runId(), running.call().toolCallId(), "checking", "正在校验订单状态", 30));
+        if (token.isCancellationRequested()) {
+            return cancelledBeforeSideEffect(running);
+        }
         if (args.confirmToken() == null || args.confirmToken().isBlank()) {
             CancelPreview preview = orderClient.previewCancelOrder(ctx.userId(), args.orderId());
             if (!preview.cancellable()) {
@@ -108,12 +111,18 @@ public final class CancelOrderTool extends AbstractTool {
         }
 
         String argsHash = argumentsHasher.hash(normalizedArgsJson);
+        if (token.isCancellationRequested()) {
+            return cancelledBeforeSideEffect(running);
+        }
         boolean accepted = confirmTokenStore.consume(ctx.runId(), ctx.userId(), args.confirmToken(), schema().name(), argsHash);
         if (!accepted) {
             return ToolTerminal.failed(running.call().toolCallId(), objectMapper.writeValueAsString(Map.of(
                     "type", "invalid_confirm_token",
-                    "message", "confirmToken is missing, expired, or does not match the dry-run arguments"
+                "message", "confirmToken is missing, expired, or does not match the dry-run arguments"
             )));
+        }
+        if (token.isCancellationRequested()) {
+            return cancelledBeforeSideEffect(running);
         }
         ctx.sink().onToolProgress(new com.ai.agent.api.ToolProgressEvent(ctx.runId(), running.call().toolCallId(), "cancelling", "正在取消订单", 70));
         CancelResult result = orderClient.cancelOrder(ctx.userId(), args.orderId());
@@ -136,6 +145,14 @@ public final class CancelOrderTool extends AbstractTool {
         } catch (JsonProcessingException e) {
             return "{\"type\":\"invalid_args\"}";
         }
+    }
+
+    private ToolTerminal cancelledBeforeSideEffect(StartedTool running) {
+        return ToolTerminal.syntheticCancelled(
+                running.call().toolCallId(),
+                CancelReason.RUN_ABORTED,
+                "{\"type\":\"run_aborted\",\"message\":\"tool cancelled before side effect\"}"
+        );
     }
 
     private record CancelArgs(String orderId, String confirmToken) {

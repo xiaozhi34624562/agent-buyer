@@ -8,6 +8,8 @@ import com.ai.agent.util.Ids;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
@@ -16,6 +18,8 @@ import java.util.concurrent.RejectedExecutionException;
 
 @Component
 public final class AgentEventRecorder {
+    private static final Logger log = LoggerFactory.getLogger(AgentEventRecorder.class);
+
     private final AgentEventMapper eventMapper;
     private final AgentToolProgressMapper progressMapper;
     private final ObjectMapper objectMapper;
@@ -67,10 +71,12 @@ public final class AgentEventRecorder {
                     task.run();
                     meterRegistry.counter("agent.event_queue.write", "type", type, "status", "ok").increment();
                 } catch (Exception e) {
+                    log.warn("agent async {} write failed", type, e);
                     meterRegistry.counter("agent.event_queue.write", "type", type, "status", "failed").increment();
                 }
             });
         } catch (RejectedExecutionException e) {
+            log.warn("agent async {} write dropped because queue is full", type, e);
             meterRegistry.counter("agent.event_queue.write", "type", type, "status", "dropped").increment();
         }
     }

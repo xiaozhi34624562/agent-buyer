@@ -13,6 +13,8 @@ import com.ai.agent.tool.ToolStatus;
 import com.ai.agent.tool.ToolTerminal;
 import com.ai.agent.trajectory.TrajectoryStore;
 import com.ai.agent.util.Ids;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -22,12 +24,14 @@ import java.time.LocalDateTime;
 
 @Component
 public final class RunRepairService {
+    private static final Logger log = LoggerFactory.getLogger(RunRepairService.class);
     private static final int REPAIR_BATCH_SIZE = 100;
 
     private final AgentProperties properties;
     private final AgentRunMapper runMapper;
     private final AgentToolCallTraceMapper toolCallMapper;
     private final TrajectoryStore trajectoryStore;
+    private final RunStateMachine stateMachine;
     private final ConfirmTokenStore confirmTokenStore;
 
     public RunRepairService(
@@ -41,6 +45,7 @@ public final class RunRepairService {
         this.runMapper = runMapper;
         this.toolCallMapper = toolCallMapper;
         this.trajectoryStore = trajectoryStore;
+        this.stateMachine = new RunStateMachine(trajectoryStore);
         this.confirmTokenStore = confirmTokenStore;
     }
 
@@ -51,6 +56,7 @@ public final class RunRepairService {
         for (AgentRunEntity run : runMapper.findStartupRepairCandidates(cutoff, REPAIR_BATCH_SIZE)) {
             int repaired = 0;
             for (AgentToolCallTraceEntity call : toolCallMapper.findMissingResultsByRunId(run.getRunId())) {
+                log.warn("repairing orphan tool result runId={} toolUseId={} toolCallId={}", run.getRunId(), call.getToolUseId(), call.getToolCallId());
                 ToolTerminal terminal = ToolTerminal.syntheticCancelled(
                         call.getToolCallId(),
                         CancelReason.RUN_ABORTED,
@@ -67,7 +73,8 @@ public final class RunRepairService {
             String message = repaired > 0
                     ? "startup repair closed missing tool results"
                     : "startup repair closed stale run";
-            trajectoryStore.updateRunStatus(run.getRunId(), status, message);
+            stateMachine.repairTerminal(run.getRunId(), status, message);
+            log.warn("startup repair closed run runId={} status={} repairedToolResults={}", run.getRunId(), status, repaired);
         }
     }
 
@@ -75,12 +82,17 @@ public final class RunRepairService {
     public void expireWaitingConfirmations() {
         LocalDateTime cutoff = LocalDateTime.now().minus(properties.getConfirmationTtl());
         for (AgentRunEntity run : runMapper.findExpiredConfirmationRuns(cutoff, REPAIR_BATCH_SIZE)) {
+            log.warn("confirmation timed out runId={}", run.getRunId());
+            RunStateMachine.TransitionResult expired = stateMachine.confirmationTimeout(run.getRunId());
+            if (!expired.changed()) {
+                log.warn("confirmation timeout skipped because run status changed runId={}", run.getRunId());
+                continue;
+            }
             confirmTokenStore.clearRun(run.getRunId());
             trajectoryStore.appendMessage(
                     run.getRunId(),
                     LlmMessage.assistant(Ids.newId("msg"), "确认已超时，写操作未执行。", java.util.List.of())
             );
-            trajectoryStore.updateRunStatus(run.getRunId(), RunStatus.TIMEOUT, "confirmation timeout");
         }
     }
 

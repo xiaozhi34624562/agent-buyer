@@ -2,32 +2,28 @@ package com.ai.agent.tool;
 
 import com.ai.agent.config.AgentProperties;
 import com.ai.agent.tool.redis.RedisToolStore;
-import com.ai.agent.trajectory.TrajectoryStore;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
-import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 @Component
 public final class ToolLeaseReaper {
     private final AgentProperties properties;
     private final RedisToolStore store;
     private final RedisToolRuntime runtime;
-    private final TrajectoryStore trajectoryStore;
+    private final ToolResultCloser toolResultCloser;
 
     public ToolLeaseReaper(
             AgentProperties properties,
             RedisToolStore store,
             RedisToolRuntime runtime,
-            TrajectoryStore trajectoryStore
+            ToolResultCloser toolResultCloser
     ) {
         this.properties = properties;
         this.store = store;
         this.runtime = runtime;
-        this.trajectoryStore = trajectoryStore;
+        this.toolResultCloser = toolResultCloser;
     }
 
     @Scheduled(
@@ -42,14 +38,7 @@ public final class ToolLeaseReaper {
         for (String runId : store.activeRunIds()) {
             var terminals = store.reapExpiredLeases(runId, nowMillis);
             if (!terminals.isEmpty()) {
-                Map<String, ToolCall> calls = trajectoryStore.findToolCallsByRun(runId).stream()
-                        .collect(Collectors.toMap(ToolCall::toolCallId, Function.identity(), (left, right) -> left));
-                for (ToolTerminal terminal : terminals) {
-                    ToolCall call = calls.get(terminal.toolCallId());
-                    if (call != null) {
-                        trajectoryStore.writeToolResult(runId, call.toolUseId(), terminal);
-                    }
-                }
+                toolResultCloser.closeTerminals(runId, terminals, null);
             }
             runtime.drainRun(runId);
         }

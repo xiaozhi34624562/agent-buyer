@@ -3,9 +3,11 @@ package com.ai.agent;
 import com.ai.agent.domain.FinishReason;
 import com.ai.agent.llm.LlmMessage;
 import com.ai.agent.llm.ToolCallMessage;
-import com.ai.agent.persistence.entity.AgentToolCallTraceEntity;
 import com.ai.agent.tool.ToolCall;
 import com.ai.agent.tool.ToolTerminal;
+import com.ai.agent.trajectory.RunContext;
+import com.ai.agent.trajectory.RunContextStore;
+import com.ai.agent.trajectory.TrajectoryReader;
 import com.ai.agent.trajectory.TrajectoryStore;
 import com.ai.agent.util.Ids;
 import org.junit.jupiter.api.Test;
@@ -22,6 +24,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 class TrajectoryStoreIntegrationTest {
     @Autowired
     TrajectoryStore trajectoryStore;
+
+    @Autowired
+    TrajectoryReader trajectoryReader;
+
+    @Autowired
+    RunContextStore runContextStore;
 
     @Test
     void loadTrajectoryReturnsRunMessagesAttemptsToolCallsAndResults() {
@@ -65,17 +73,41 @@ class TrajectoryStoreIntegrationTest {
         );
         trajectoryStore.writeToolResult(runId, toolUseId, ToolTerminal.succeeded(toolCallId, "{}"));
 
-        var trajectory = trajectoryStore.loadTrajectory(runId);
+        var trajectory = trajectoryReader.loadTrajectorySnapshot(runId);
 
-        assertThat(trajectory.get("run")).isNotNull();
-        assertThat((List<?>) trajectory.get("messages")).hasSize(2);
-        assertThat((List<?>) trajectory.get("llmAttempts")).hasSize(1);
-        assertThat((List<?>) trajectory.get("toolCalls")).hasSize(1)
+        assertThat(trajectory.run()).isNotNull();
+        assertThat(trajectory.messages()).hasSize(2);
+        assertThat(trajectory.llmAttempts()).hasSize(1);
+        assertThat(trajectory.toolCalls()).hasSize(1)
                 .first()
-                .isInstanceOfSatisfying(AgentToolCallTraceEntity.class, savedCall -> {
+                .satisfies(savedCall -> {
                     assertThat(savedCall.getConcurrent()).isTrue();
                     assertThat(savedCall.getIdempotent()).isTrue();
                 });
-        assertThat((List<?>) trajectory.get("toolResults")).hasSize(1);
+        assertThat(trajectory.toolResults()).hasSize(1);
+    }
+
+    @Test
+    void runContextPersistsEffectiveToolsModelAndMaxTurns() {
+        String runId = Ids.newId("test_run");
+
+        trajectoryStore.createRun(runId, "demo-user");
+        runContextStore.create(new RunContext(
+                runId,
+                List.of("cancel_order", "query_order"),
+                "deepseek-chat",
+                3,
+                null,
+                null
+        ));
+
+        RunContext loaded = runContextStore.load(runId);
+
+        assertThat(loaded.runId()).isEqualTo(runId);
+        assertThat(loaded.effectiveAllowedTools()).containsExactly("cancel_order", "query_order");
+        assertThat(loaded.model()).isEqualTo("deepseek-chat");
+        assertThat(loaded.maxTurns()).isEqualTo(3);
+        assertThat(loaded.createdAt()).isNotNull();
+        assertThat(loaded.updatedAt()).isNotNull();
     }
 }

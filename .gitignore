@@ -3,6 +3,7 @@ target/
 *.iml
 .DS_Store
 *.log
+logs/
 .env
 .env.*
 application-local.yml

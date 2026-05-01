@@ -23,6 +23,25 @@ public interface AgentRunMapper extends BaseMapper<AgentRunEntity> {
             """)
     int updateStatus(@Param("runId") String runId, @Param("status") String status, @Param("error") String error);
 
+    @Update("""
+            UPDATE agent_run
+            SET status = #{nextStatus},
+                last_error = #{error},
+                completed_at = CASE
+                    WHEN #{nextStatus} IN ('SUCCEEDED', 'FAILED', 'FAILED_RECOVERED', 'CANCELLED', 'TIMEOUT')
+                    THEN CURRENT_TIMESTAMP(3)
+                    ELSE completed_at
+                END
+            WHERE run_id = #{runId}
+              AND status = #{expectedStatus}
+            """)
+    int transitionStatus(
+            @Param("runId") String runId,
+            @Param("expectedStatus") String expectedStatus,
+            @Param("nextStatus") String nextStatus,
+            @Param("error") String error
+    );
+
     @Update("UPDATE agent_run SET turn_no = turn_no + 1 WHERE run_id = #{runId}")
     int incrementTurn(@Param("runId") String runId);
 

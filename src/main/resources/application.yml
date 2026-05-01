@@ -28,6 +28,9 @@ management:
 
 agent:
   redis-key-prefix: agent
+  default-allowed-tools:
+    - query_order
+    - cancel_order
   max-parallel: 6
   max-scan: 256
   lease-ms: 90000

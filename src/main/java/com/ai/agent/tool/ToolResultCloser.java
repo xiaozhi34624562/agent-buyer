@@ -1,0 +1,135 @@
+package com.ai.agent.tool;
+
+import com.ai.agent.api.AgentEventSink;
+import com.ai.agent.api.ToolResultEvent;
+import com.ai.agent.llm.LlmMessage;
+import com.ai.agent.llm.MessageRole;
+import com.ai.agent.persistence.entity.AgentMessageEntity;
+import com.ai.agent.persistence.entity.AgentToolResultTraceEntity;
+import com.ai.agent.trajectory.TrajectoryReader;
+import com.ai.agent.trajectory.TrajectorySnapshot;
+import com.ai.agent.trajectory.TrajectoryStore;
+import com.ai.agent.util.Ids;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+
+import java.util.LinkedHashMap;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+@Component
+public final class ToolResultCloser {
+    private static final Logger log = LoggerFactory.getLogger(ToolResultCloser.class);
+
+    private final TrajectoryStore trajectoryStore;
+    private final TrajectoryReader trajectoryReader;
+
+    public ToolResultCloser(TrajectoryStore trajectoryStore, TrajectoryReader trajectoryReader) {
+        this.trajectoryStore = trajectoryStore;
+        this.trajectoryReader = trajectoryReader;
+    }
+
+    public void closeTerminal(String runId, ToolCall call, ToolTerminal terminal, AgentEventSink sink) {
+        ClosedState closed = loadClosedState(runId);
+        closeTerminal(runId, call, terminal, sink, closed);
+    }
+
+    public void closeTerminals(String runId, List<ToolTerminal> terminals, AgentEventSink sink) {
+        if (terminals == null || terminals.isEmpty()) {
+            return;
+        }
+        Map<String, ToolCall> callsById = trajectoryReader.findToolCallsByRun(runId).stream()
+                .collect(Collectors.toMap(ToolCall::toolCallId, call -> call, (left, right) -> left, LinkedHashMap::new));
+        ClosedState closed = loadClosedState(runId);
+        for (ToolTerminal terminal : terminals) {
+            ToolCall call = callsById.get(terminal.toolCallId());
+            if (call == null) {
+                log.warn("tool terminal cannot be closed because tool call is missing toolCallId={}", terminal.toolCallId());
+                continue;
+            }
+            closeTerminal(runId, call, terminal, sink, closed);
+        }
+    }
+
+    public List<ToolTerminal> closeSynthetic(
+            String runId,
+            List<ToolCall> calls,
+            CancelReason reason,
+            String errorJson,
+            AgentEventSink sink
+    ) {
+        if (calls == null || calls.isEmpty()) {
+            return List.of();
+        }
+        ClosedState closed = loadClosedState(runId);
+        List<ToolTerminal> terminals = new ArrayList<>(calls.size());
+        for (ToolCall call : calls) {
+            ToolTerminal terminal = ToolTerminal.syntheticCancelled(call.toolCallId(), reason, errorJson);
+            closeTerminal(runId, call, terminal, sink, closed);
+            terminals.add(terminal);
+        }
+        return terminals;
+    }
+
+    private void closeTerminal(
+            String runId,
+            ToolCall call,
+            ToolTerminal terminal,
+            AgentEventSink sink,
+            ClosedState closed
+    ) {
+        boolean wrote = false;
+        if (!closed.resultToolCallIds().contains(call.toolCallId())) {
+            trajectoryStore.writeToolResult(runId, call.toolUseId(), terminal);
+            closed.resultToolCallIds().add(call.toolCallId());
+            wrote = true;
+        }
+        if (!closed.toolMessageUseIds().contains(call.toolUseId())) {
+            trajectoryStore.appendMessage(runId, LlmMessage.tool(Ids.newId("msg"), call.toolUseId(), terminalContent(terminal)));
+            closed.toolMessageUseIds().add(call.toolUseId());
+            wrote = true;
+        }
+        if (wrote && sink != null) {
+            sink.onToolResult(new ToolResultEvent(
+                    runId,
+                    call.toolUseId(),
+                    terminal.status(),
+                    terminal.resultJson(),
+                    terminal.errorJson()
+            ));
+        }
+    }
+
+    private ClosedState loadClosedState(String runId) {
+        try {
+            TrajectorySnapshot snapshot = trajectoryReader.loadTrajectorySnapshot(runId);
+            Set<String> resultToolCallIds = snapshot.toolResults().stream()
+                    .map(AgentToolResultTraceEntity::getToolCallId)
+                    .collect(Collectors.toSet());
+            Set<String> toolMessageUseIds = snapshot.messages().stream()
+                    .filter(message -> MessageRole.TOOL.name().equals(message.getRole()))
+                    .map(AgentMessageEntity::getToolUseId)
+                    .collect(Collectors.toSet());
+            return new ClosedState(resultToolCallIds, toolMessageUseIds);
+        } catch (UnsupportedOperationException e) {
+            return new ClosedState(new java.util.HashSet<>(), new java.util.HashSet<>());
+        }
+    }
+
+    private String terminalContent(ToolTerminal terminal) {
+        if (terminal.resultJson() != null && !terminal.resultJson().isBlank()) {
+            return terminal.resultJson();
+        }
+        if (terminal.errorJson() != null && !terminal.errorJson().isBlank()) {
+            return terminal.errorJson();
+        }
+        return "{\"type\":\"empty_tool_result\"}";
+    }
+
+    private record ClosedState(Set<String> resultToolCallIds, Set<String> toolMessageUseIds) {
+    }
+}

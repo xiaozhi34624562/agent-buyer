@@ -26,12 +26,23 @@ public class LuaRedisToolStore implements RedisToolStore {
             if redis.call('HSETNX', KEYS[3], ARGV[1], ARGV[2]) == 0 then
               return 0
             end
+            local state = cjson.decode(ARGV[4])
+            if redis.call('HEXISTS', KEYS[4], 'abort_requested') == 1 then
+              state['status'] = 'CANCELLED'
+              state['cancelReason'] = 'RUN_ABORTED'
+              state['errorJson'] = ARGV[5]
+              redis.call('HSET', KEYS[2], ARGV[2], cjson.encode(state))
+              return 1
+            end
             redis.call('ZADD', KEYS[1], ARGV[3], ARGV[2])
             redis.call('HSET', KEYS[2], ARGV[2], ARGV[4])
             return 1
             """;
 
     private static final String SCHEDULE_SCRIPT = """
+            if redis.call('HEXISTS', KEYS[4], 'abort_requested') == 1 then
+              return {}
+            end
             local ids = redis.call('ZRANGE', KEYS[1], 0, tonumber(ARGV[4]) - 1)
             local running = 0
             local runningUnsafe = false
@@ -107,6 +118,12 @@ public class LuaRedisToolStore implements RedisToolStore {
               return 0
             end
             local state = cjson.decode(raw)
+            local terminal = cjson.decode(ARGV[4])
+            if redis.call('HEXISTS', KEYS[3], 'abort_requested') == 1
+              and terminal['status'] ~= 'CANCELLED'
+              and state['call']['idempotent'] == true then
+              return 0
+            end
             if state['status'] ~= 'RUNNING' then
               return 0
             end
@@ -116,7 +133,6 @@ public class LuaRedisToolStore implements RedisToolStore {
             if state['leaseToken'] ~= ARGV[3] then
               return 0
             end
-            local terminal = cjson.decode(ARGV[4])
             state['status'] = terminal['status']
             state['resultJson'] = terminal['resultJson']
             state['errorJson'] = terminal['errorJson']
@@ -192,6 +208,33 @@ public class LuaRedisToolStore implements RedisToolStore {
             return terminals
             """;
 
+    private static final String CANCEL_ACTIVE_SCRIPT = """
+            local ids = redis.call('ZRANGE', KEYS[1], 0, -1)
+            local terminals = {}
+            for _, id in ipairs(ids) do
+              local raw = redis.call('HGET', KEYS[2], id)
+              if raw then
+                local state = cjson.decode(raw)
+                if state['status'] == 'WAITING' or (state['status'] == 'RUNNING' and state['call']['idempotent'] == true) then
+                  state['status'] = 'CANCELLED'
+                  state['cancelReason'] = ARGV[1]
+                  state['errorJson'] = ARGV[2]
+                  redis.call('HSET', KEYS[2], id, cjson.encode(state))
+                  redis.call('ZREM', KEYS[3], id)
+                  table.insert(terminals, cjson.encode({
+                    toolCallId = id,
+                    status = 'CANCELLED',
+                    resultJson = cjson.null,
+                    errorJson = ARGV[2],
+                    cancelReason = ARGV[1],
+                    synthetic = true
+                  }))
+                end
+              end
+            end
+            return terminals
+            """;
+
     private final AgentProperties properties;
     private final RedisKeys keys;
     private final StringRedisTemplate redisTemplate;
@@ -227,11 +270,12 @@ public class LuaRedisToolStore implements RedisToolStore {
         );
         Long result = redisTemplate.execute(
                 new DefaultRedisScript<>(INGEST_SCRIPT, Long.class),
-                List.of(keys.queue(runId), keys.tools(runId), keys.toolUseIds(runId)),
+                List.of(keys.queue(runId), keys.tools(runId), keys.toolUseIds(runId), keys.meta(runId)),
                 call.toolUseId(),
                 call.toolCallId(),
                 Long.toString(call.seq()),
-                toJson(state)
+                toJson(state),
+                "{\"type\":\"run_aborted\",\"message\":\"tool call ingested after run abort\"}"
         );
         boolean ingested = result != null && result == 1L;
         if (ingested) {
@@ -244,7 +288,7 @@ public class LuaRedisToolStore implements RedisToolStore {
     public List<StartedTool> schedule(String runId) {
         List<String> states = redisTemplate.execute(
                 new DefaultRedisScript<>(SCHEDULE_SCRIPT, List.class),
-                List.of(keys.queue(runId), keys.tools(runId), keys.leases(runId)),
+                List.of(keys.queue(runId), keys.tools(runId), keys.leases(runId), keys.meta(runId)),
                 Long.toString(Instant.now().toEpochMilli()),
                 Long.toString(properties.getLeaseMs()),
                 Integer.toString(properties.getMaxParallel()),
@@ -271,7 +315,7 @@ public class LuaRedisToolStore implements RedisToolStore {
     public boolean complete(StartedTool running, ToolTerminal terminal) {
         Long result = redisTemplate.execute(
                 new DefaultRedisScript<>(COMPLETE_SCRIPT, Long.class),
-                List.of(keys.tools(running.call().runId()), keys.leases(running.call().runId())),
+                List.of(keys.tools(running.call().runId()), keys.leases(running.call().runId()), keys.meta(running.call().runId())),
                 running.call().toolCallId(),
                 Integer.toString(running.attempt()),
                 running.leaseToken(),
@@ -324,7 +368,7 @@ public class LuaRedisToolStore implements RedisToolStore {
                 state.resultJson(),
                 state.errorJson(),
                 state.cancelReason(),
-                false
+                state.status() == ToolStatus.CANCELLED && state.cancelReason() != null
         ));
     }
 
@@ -346,9 +390,37 @@ public class LuaRedisToolStore implements RedisToolStore {
     }
 
     @Override
-    public void abort(String runId, String reason) {
+    public List<ToolTerminal> abort(String runId, String reason) {
         redisTemplate.opsForHash().put(keys.meta(runId), "abort_requested", reason == null ? "true" : reason);
-        cancelWaiting(runId, CancelReason.RUN_ABORTED);
+        List<String> terminals = redisTemplate.execute(
+                new DefaultRedisScript<>(CANCEL_ACTIVE_SCRIPT, List.class),
+                List.of(keys.queue(runId), keys.tools(runId), keys.leases(runId)),
+                abortReason(reason).name(),
+                "{\"type\":\"cancelled\",\"reason\":\"" + (reason == null ? "abort_requested" : reason) + "\"}"
+        );
+        if (terminals == null) {
+            return List.of();
+        }
+        return terminals.stream().map(this::readTerminal).toList();
+    }
+
+    @Override
+    public boolean abortRequested(String runId) {
+        Object value = redisTemplate.opsForHash().get(keys.meta(runId), "abort_requested");
+        return value != null;
+    }
+
+    private CancelReason abortReason(String reason) {
+        if ("run_wallclock_timeout".equals(reason)) {
+            return CancelReason.RUN_TIMEOUT;
+        }
+        if ("tool_result_timeout".equals(reason)) {
+            return CancelReason.TOOL_TIMEOUT;
+        }
+        if ("user_abort".equals(reason)) {
+            return CancelReason.USER_ABORT;
+        }
+        return CancelReason.RUN_ABORTED;
     }
 
     private ToolCallRuntimeState readState(String json) {

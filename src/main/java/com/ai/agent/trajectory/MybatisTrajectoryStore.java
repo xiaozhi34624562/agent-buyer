@@ -34,7 +34,7 @@ import java.util.List;
 import java.util.Map;
 
 @Service
-public class MybatisTrajectoryStore implements TrajectoryStore {
+public class MybatisTrajectoryStore implements TrajectoryStore, TrajectoryReader {
     private static final TypeReference<List<ToolCallMessage>> TOOL_CALLS_TYPE = new TypeReference<>() {
     };
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
@@ -82,6 +82,11 @@ public class MybatisTrajectoryStore implements TrajectoryStore {
     @Override
     public void updateRunStatus(String runId, RunStatus status, String error) {
         runMapper.updateStatus(runId, status.name(), error);
+    }
+
+    @Override
+    public boolean transitionRunStatus(String runId, RunStatus expected, RunStatus next, String error) {
+        return runMapper.transitionStatus(runId, expected.name(), next.name(), error) == 1;
     }
 
     @Override
@@ -196,23 +201,23 @@ public class MybatisTrajectoryStore implements TrajectoryStore {
     }
 
     @Override
-    public Map<String, Object> loadTrajectory(String runId) {
+    public TrajectorySnapshot loadTrajectorySnapshot(String runId) {
         AgentRunEntity run = runMapper.selectById(runId);
-        return Map.of(
-                "run", run,
-                "messages", messageMapper.findByRunId(runId),
-                "llmAttempts", llmAttemptMapper.selectList(new LambdaQueryWrapper<AgentLlmAttemptEntity>()
+        return new TrajectorySnapshot(
+                run,
+                messageMapper.findByRunId(runId),
+                llmAttemptMapper.selectList(new LambdaQueryWrapper<AgentLlmAttemptEntity>()
                         .eq(AgentLlmAttemptEntity::getRunId, runId)
                         .orderByAsc(AgentLlmAttemptEntity::getTurnNo)
                         .orderByAsc(AgentLlmAttemptEntity::getStartedAt)),
-                "toolCalls", toolCallMapper.findByRunId(runId),
-                "toolResults", toolResultMapper.selectList(new LambdaQueryWrapper<AgentToolResultTraceEntity>()
+                toolCallMapper.findByRunId(runId),
+                toolResultMapper.selectList(new LambdaQueryWrapper<AgentToolResultTraceEntity>()
                         .eq(AgentToolResultTraceEntity::getRunId, runId)
                         .orderByAsc(AgentToolResultTraceEntity::getCreatedAt)),
-                "events", eventMapper.selectList(new LambdaQueryWrapper<AgentEventEntity>()
+                eventMapper.selectList(new LambdaQueryWrapper<AgentEventEntity>()
                         .eq(AgentEventEntity::getRunId, runId)
                         .orderByAsc(AgentEventEntity::getCreatedAt)),
-                "toolProgress", progressMapper.selectList(new LambdaQueryWrapper<AgentToolProgressEntity>()
+                progressMapper.selectList(new LambdaQueryWrapper<AgentToolProgressEntity>()
                         .eq(AgentToolProgressEntity::getRunId, runId)
                         .orderByAsc(AgentToolProgressEntity::getCreatedAt))
         );

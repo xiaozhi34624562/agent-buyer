@@ -1,39 +1,32 @@
 package com.ai.agent.api;
 
 import com.ai.agent.config.AgentProperties;
-import com.ai.agent.domain.FinishReason;
 import com.ai.agent.domain.RunStatus;
-import com.ai.agent.llm.LlmChatRequest;
 import com.ai.agent.llm.LlmMessage;
 import com.ai.agent.llm.LlmProviderAdapter;
-import com.ai.agent.llm.LlmStreamResult;
-import com.ai.agent.llm.LlmUsage;
 import com.ai.agent.llm.PromptAssembler;
-import com.ai.agent.llm.ToolCallMessage;
 import com.ai.agent.llm.TranscriptPairValidator;
-import com.ai.agent.tool.CancelReason;
 import com.ai.agent.tool.ConfirmTokenStore;
 import com.ai.agent.tool.RunEventSinkRegistry;
 import com.ai.agent.tool.Tool;
-import com.ai.agent.tool.ToolCall;
 import com.ai.agent.tool.ToolRegistry;
+import com.ai.agent.tool.ToolResultCloser;
 import com.ai.agent.tool.ToolResultWaiter;
 import com.ai.agent.tool.ToolRuntime;
-import com.ai.agent.tool.ToolStatus;
-import com.ai.agent.tool.ToolTerminal;
-import com.ai.agent.tool.ToolUse;
-import com.ai.agent.tool.ToolUseContext;
-import com.ai.agent.tool.ToolValidation;
 import com.ai.agent.tool.redis.RedisToolStore;
+import com.ai.agent.trajectory.RunContext;
+import com.ai.agent.trajectory.RunContextStore;
+import com.ai.agent.trajectory.TrajectoryReader;
 import com.ai.agent.trajectory.TrajectoryStore;
 import com.ai.agent.util.Ids;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
-import java.time.Instant;
-import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,19 +36,45 @@ import java.util.stream.Collectors;
 
 @Service
 public final class DefaultAgentLoop implements AgentLoop {
+    private static final Logger log = LoggerFactory.getLogger(DefaultAgentLoop.class);
+
     private final AgentProperties properties;
     private final PromptAssembler promptAssembler;
-    private final LlmProviderAdapter providerAdapter;
-    private final TranscriptPairValidator transcriptPairValidator;
     private final ToolRegistry toolRegistry;
-    private final ToolRuntime toolRuntime;
-    private final RedisToolStore redisToolStore;
-    private final ToolResultWaiter toolResultWaiter;
     private final TrajectoryStore trajectoryStore;
+    private final RunContextStore runContextStore;
     private final RunEventSinkRegistry sinkRegistry;
-    private final ContinuationLockService continuationLockService;
+    private final RunAccessManager runAccessManager;
+    private final RunStateMachine stateMachine;
+    private final AgentTurnOrchestrator turnOrchestrator;
+    private final ConfirmationIntentService confirmationIntentService;
     private final ConfirmTokenStore confirmTokenStore;
-    private final ObjectMapper objectMapper;
+
+    @Autowired
+    public DefaultAgentLoop(
+            AgentProperties properties,
+            PromptAssembler promptAssembler,
+            ToolRegistry toolRegistry,
+            TrajectoryStore trajectoryStore,
+            RunContextStore runContextStore,
+            RunEventSinkRegistry sinkRegistry,
+            RunAccessManager runAccessManager,
+            AgentTurnOrchestrator turnOrchestrator,
+            ConfirmationIntentService confirmationIntentService,
+            ConfirmTokenStore confirmTokenStore
+    ) {
+        this.properties = properties;
+        this.promptAssembler = promptAssembler;
+        this.toolRegistry = toolRegistry;
+        this.trajectoryStore = trajectoryStore;
+        this.runContextStore = runContextStore;
+        this.sinkRegistry = sinkRegistry;
+        this.runAccessManager = runAccessManager;
+        this.stateMachine = new RunStateMachine(trajectoryStore);
+        this.turnOrchestrator = turnOrchestrator;
+        this.confirmationIntentService = confirmationIntentService;
+        this.confirmTokenStore = confirmTokenStore;
+    }
 
     public DefaultAgentLoop(
             AgentProperties properties,
@@ -67,343 +86,257 @@ public final class DefaultAgentLoop implements AgentLoop {
             RedisToolStore redisToolStore,
             ToolResultWaiter toolResultWaiter,
             TrajectoryStore trajectoryStore,
+            TrajectoryReader trajectoryReader,
+            RunContextStore runContextStore,
             RunEventSinkRegistry sinkRegistry,
-            ContinuationLockService continuationLockService,
+            RunAccessManager runAccessManager,
             ConfirmTokenStore confirmTokenStore,
             ObjectMapper objectMapper
     ) {
-        this.properties = properties;
-        this.promptAssembler = promptAssembler;
-        this.providerAdapter = providerAdapter;
-        this.transcriptPairValidator = transcriptPairValidator;
-        this.toolRegistry = toolRegistry;
-        this.toolRuntime = toolRuntime;
-        this.redisToolStore = redisToolStore;
-        this.toolResultWaiter = toolResultWaiter;
-        this.trajectoryStore = trajectoryStore;
-        this.sinkRegistry = sinkRegistry;
-        this.continuationLockService = continuationLockService;
-        this.confirmTokenStore = confirmTokenStore;
-        this.objectMapper = objectMapper;
+        this(
+                properties,
+                promptAssembler,
+                toolRegistry,
+                trajectoryStore,
+                runContextStore,
+                sinkRegistry,
+                runAccessManager,
+                new AgentTurnOrchestrator(
+                        properties,
+                        transcriptPairValidator,
+                        new LlmAttemptService(providerAdapter, trajectoryStore, objectMapper),
+                        new ToolCallCoordinator(
+                                properties,
+                                toolRegistry,
+                                toolRuntime,
+                                redisToolStore,
+                                toolResultWaiter,
+                                trajectoryStore,
+                                trajectoryReader,
+                                new ToolResultCloser(trajectoryStore, trajectoryReader),
+                                objectMapper
+                        ),
+                        trajectoryStore,
+                        trajectoryReader,
+                        new RunStateMachine(trajectoryStore)
+                ),
+                new ConfirmationIntentService(),
+                confirmTokenStore
+        );
     }
 
     @Override
     public AgentRunResult run(String userId, AgentRunRequest request, AgentEventSink sink) {
         String runId = Ids.newId("run");
-        trajectoryStore.createRun(runId, userId);
-        sinkRegistry.bind(runId, sink);
-        try {
-            List<Tool> allowedTools = toolRegistry.allowed(request.allowedToolNames());
-            trajectoryStore.appendMessage(runId, LlmMessage.system(Ids.newId("msg"), promptAssembler.materializeSystemPrompt(userId, allowedTools)));
-            for (UserMessage message : request.messages()) {
-                trajectoryStore.appendMessage(runId, LlmMessage.user(Ids.newId("msg"), message.content()));
+        try (MDC.MDCCloseable ignoredRun = MDC.putCloseable("runId", runId);
+             MDC.MDCCloseable ignoredUser = MDC.putCloseable("userId", userId)) {
+            log.info("agent run created messageCount={}", request.messages().size());
+            List<Tool> allowedTools = effectiveAllowedTools(request.allowedToolNames());
+            RunContext runContext = new RunContext(
+                    runId,
+                    effectiveAllowedToolNames(allowedTools),
+                    effectiveModel(request.llmParams()),
+                    effectiveMaxTurns(request.llmParams()),
+                    null,
+                    null
+            );
+            createRunAndContext(runId, userId, runContext);
+            sinkRegistry.bind(runId, sink);
+            try {
+                log.info("agent run prompt assembly started allowedToolCount={}", allowedTools.size());
+                trajectoryStore.appendMessage(runId, LlmMessage.system(Ids.newId("msg"), promptAssembler.materializeSystemPrompt(userId, allowedTools)));
+                for (UserMessage message : request.messages()) {
+                    trajectoryStore.appendMessage(runId, LlmMessage.user(Ids.newId("msg"), message.content()));
+                }
+                stateMachine.startRun(runId);
+                return runUntilStop(runId, userId, runContext, request.llmParams(), sink);
+            } finally {
+                sinkRegistry.unbind(runId);
             }
-            trajectoryStore.updateRunStatus(runId, RunStatus.RUNNING, null);
-            return runUntilStop(runId, userId, request.allowedToolNames(), request.llmParams(), sink);
-        } finally {
-            sinkRegistry.unbind(runId);
         }
     }
 
     @Override
     public AgentRunResult continueRun(String userId, String runId, UserMessage message, AgentEventSink sink) {
-        ContinuationLockService.Lock lock = continuationLockService.acquire(runId);
-        if (lock == null) {
-            throw new IllegalStateException("run is already being continued");
+        try (MDC.MDCCloseable ignoredRun = MDC.putCloseable("runId", runId);
+             MDC.MDCCloseable ignoredUser = MDC.putCloseable("userId", userId)) {
+            RunAccessManager.ContinuationPermit permit = runAccessManager.acquireContinuation(userId, runId);
+            return continueRunWithPermit(userId, runId, message, sink, permit);
+        }
+    }
+
+    @Override
+    public AgentRunResult continueRun(
+            String userId,
+            String runId,
+            UserMessage message,
+            AgentEventSink sink,
+            RunAccessManager.ContinuationPermit permit
+    ) {
+        try (MDC.MDCCloseable ignoredRun = MDC.putCloseable("runId", runId);
+             MDC.MDCCloseable ignoredUser = MDC.putCloseable("userId", userId)) {
+            return continueRunWithPermit(userId, runId, message, sink, permit);
+        }
+    }
+
+    private AgentRunResult continueRunWithPermit(
+            String userId,
+            String runId,
+            UserMessage message,
+            AgentEventSink sink,
+            RunAccessManager.ContinuationPermit permit
+    ) {
+        if (permit == null || !runId.equals(permit.runId())) {
+            throw new RunAccessManager.RunContinuationNotAllowedException(
+                    "continuation permit does not match run: " + runId
+            );
         }
         sinkRegistry.bind(runId, sink);
         try {
-            if (!userId.equals(trajectoryStore.findRunUserId(runId))) {
-                throw new IllegalArgumentException("run does not belong to current user");
+            RunStatus currentStatus = trajectoryStore.findRunStatus(runId);
+            if (currentStatus != RunStatus.RUNNING) {
+                log.warn("agent continuation skipped because run is no longer RUNNING status={}", currentStatus);
+                return new AgentRunResult(runId, currentStatus, null);
             }
-            RunStatus status = trajectoryStore.findRunStatus(runId);
-            if (status != RunStatus.WAITING_USER_CONFIRMATION) {
-                throw new IllegalStateException("run is not waiting for continuation: " + status);
+            RunContext runContext;
+            try {
+                runContext = runContextStore.load(runId);
+                validateRunContext(runContext);
+                trajectoryStore.appendMessage(runId, LlmMessage.user(Ids.newId("msg"), message.content()));
+            } catch (RuntimeException e) {
+                runAccessManager.restoreWaitingAfterContinuationStartFailure(permit);
+                throw e;
             }
-            trajectoryStore.appendMessage(runId, LlmMessage.user(Ids.newId("msg"), message.content()));
-            if (isRejectingConfirmation(message.content())) {
+            ConfirmationIntentService.ConfirmationIntent confirmationIntent = confirmationIntentService.classify(message.content());
+            if (confirmationIntent == ConfirmationIntentService.ConfirmationIntent.REJECT) {
                 confirmTokenStore.clearRun(runId);
                 String finalText = "已取消本次操作，订单未被更改。";
                 trajectoryStore.appendMessage(runId, LlmMessage.assistant(Ids.newId("msg"), finalText, List.of()));
-                trajectoryStore.updateRunStatus(runId, RunStatus.SUCCEEDED, null);
+                AgentRunResult terminal = transitionTerminal(runId, RunStatus.SUCCEEDED, null, finalText);
+                if (terminal.status() != RunStatus.SUCCEEDED) {
+                    return terminal;
+                }
                 sink.onFinal(new FinalEvent(runId, finalText, RunStatus.SUCCEEDED, null));
-                return new AgentRunResult(runId, RunStatus.SUCCEEDED, finalText);
+                log.info("agent continuation completed by user rejection");
+                return terminal;
             }
-            trajectoryStore.updateRunStatus(runId, RunStatus.RUNNING, null);
-            return runUntilStop(runId, userId, null, null, sink);
+            if (confirmationIntent == ConfirmationIntentService.ConfirmationIntent.AMBIGUOUS) {
+                String finalText = "请明确回复确认取消或放弃操作。";
+                trajectoryStore.appendMessage(runId, LlmMessage.assistant(Ids.newId("msg"), finalText, List.of()));
+                AgentRunResult waiting = transitionTerminal(runId, RunStatus.WAITING_USER_CONFIRMATION, null, finalText);
+                if (waiting.status() != RunStatus.WAITING_USER_CONFIRMATION) {
+                    return waiting;
+                }
+                sink.onFinal(new FinalEvent(runId, finalText, RunStatus.WAITING_USER_CONFIRMATION, "user_confirmation"));
+                log.info("agent continuation remains waiting because user confirmation intent is ambiguous");
+                return waiting;
+            }
+            log.info("agent continuation resumed");
+            return runUntilStop(runId, userId, runContext, null, sink);
         } finally {
             sinkRegistry.unbind(runId);
-            continuationLockService.release(lock);
+            runAccessManager.releaseContinuation(permit);
         }
     }
 
     private AgentRunResult runUntilStop(
             String runId,
             String userId,
-            Set<String> allowedToolNames,
+            RunContext runContext,
             LlmParams params,
             AgentEventSink sink
     ) {
-        Instant deadline = Instant.now().plusMillis(properties.getAgentLoop().getRunWallclockTimeoutMs());
-        int maxTurns = params == null ? properties.getAgentLoop().getMaxTurns() : params.effectiveMaxTurns(properties.getAgentLoop().getMaxTurns());
-        List<Tool> allowedTools = toolRegistry.allowed(allowedToolNames);
-        String model = params != null && params.model() != null && !params.model().isBlank()
-                ? params.model()
-                : properties.getLlm().getDeepseek().getDefaultModel();
-
-        for (int i = 0; i < maxTurns; i++) {
-            if (Instant.now().isAfter(deadline)) {
-                redisToolStore.abort(runId, "run_wallclock_timeout");
-                trajectoryStore.updateRunStatus(runId, RunStatus.TIMEOUT, "run wallclock timeout");
-                sink.onError(new ErrorEvent(runId, "run timeout"));
-                return new AgentRunResult(runId, RunStatus.TIMEOUT, null);
-            }
-
-            int turnNo = trajectoryStore.nextTurn(runId);
-            List<LlmMessage> messages = trajectoryStore.loadMessages(runId);
-            transcriptPairValidator.validate(messages);
-            String attemptId = Ids.newId("att");
-
-            LlmStreamResult result;
-            try {
-                result = providerAdapter.streamChat(
-                        new LlmChatRequest(
-                                runId,
-                                attemptId,
-                                model,
-                                params == null ? null : params.temperature(),
-                                params == null ? null : params.maxTokens(),
-                                messages,
-                                allowedTools.stream().map(Tool::schema).toList()
-                        ),
-                        delta -> sink.onTextDelta(new TextDeltaEvent(runId, attemptId, delta))
-                );
-                LlmUsage usage = result.usage();
-                trajectoryStore.writeLlmAttempt(
-                        attemptId,
-                        runId,
-                        turnNo,
-                        "deepseek",
-                        model,
-                        "SUCCEEDED",
-                        result.finishReason(),
-                        usage == null ? null : usage.promptTokens(),
-                        usage == null ? null : usage.completionTokens(),
-                        usage == null ? null : usage.totalTokens(),
-                        null,
-                        result.rawDiagnosticJson()
-                );
-            } catch (Exception e) {
-                trajectoryStore.writeLlmAttempt(
-                        attemptId,
-                        runId,
-                        turnNo,
-                        "deepseek",
-                        model,
-                        "FAILED",
-                        FinishReason.ERROR,
-                        null,
-                        null,
-                        null,
-                        errorJson("provider_failed", e.getMessage()),
-                        null
-                );
-                trajectoryStore.updateRunStatus(runId, RunStatus.FAILED, e.getMessage());
-                sink.onError(new ErrorEvent(runId, e.getMessage()));
-                return new AgentRunResult(runId, RunStatus.FAILED, null);
-            }
-
-            if (result.toolCalls().isEmpty()) {
-                trajectoryStore.appendMessage(runId, LlmMessage.assistant(Ids.newId("msg"), result.content(), List.of()));
-                trajectoryStore.updateRunStatus(runId, RunStatus.SUCCEEDED, null);
-                sink.onFinal(new FinalEvent(runId, result.content(), RunStatus.SUCCEEDED, null));
-                return new AgentRunResult(runId, RunStatus.SUCCEEDED, result.content());
-            }
-
-            ToolCommit commit = commitAssistantToolCalls(runId, userId, result);
-            for (ToolCall call : commit.allCalls()) {
-                sink.onToolUse(new ToolUseEvent(runId, call.toolUseId(), call.toolName(), call.argsJson()));
-            }
-            for (ToolCall failed : commit.precheckFailedCalls()) {
-                ToolTerminal terminal = new ToolTerminal(
-                        failed.toolCallId(),
-                        ToolStatus.FAILED,
-                        null,
-                        failed.precheckErrorJson(),
-                        CancelReason.PRECHECK_FAILED,
-                        true
-                );
-                trajectoryStore.writeToolResult(runId, failed.toolUseId(), terminal);
-                trajectoryStore.appendMessage(runId, LlmMessage.tool(Ids.newId("msg"), failed.toolUseId(), failed.precheckErrorJson()));
-                sink.onToolResult(new ToolResultEvent(runId, failed.toolUseId(), ToolStatus.FAILED, null, failed.precheckErrorJson()));
-            }
-            for (ToolCall valid : commit.executableCalls()) {
-                toolRuntime.onToolUse(runId, valid);
-            }
-
-            List<ToolTerminal> terminals;
-            try {
-                terminals = commit.executableCalls().isEmpty()
-                        ? List.of()
-                        : toolResultWaiter.awaitResults(
-                        runId,
-                        commit.executableCalls(),
-                        Duration.ofMillis(properties.getAgentLoop().getToolResultTimeoutMs())
-                );
-            } catch (Exception e) {
-                redisToolStore.abort(runId, "tool_result_timeout");
-                trajectoryStore.updateRunStatus(runId, RunStatus.TIMEOUT, "tool result timeout");
-                sink.onError(new ErrorEvent(runId, "tool result timeout"));
-                return new AgentRunResult(runId, RunStatus.TIMEOUT, null);
-            }
-            Map<String, ToolCall> callsById = commit.allCalls().stream()
-                    .collect(Collectors.toMap(ToolCall::toolCallId, Function.identity()));
-            for (ToolTerminal terminal : terminals) {
-                ToolCall call = callsById.get(terminal.toolCallId());
-                String content = terminal.resultJson() != null ? terminal.resultJson() : terminal.errorJson();
-                trajectoryStore.appendMessage(runId, LlmMessage.tool(Ids.newId("msg"), call.toolUseId(), content));
-                sink.onToolResult(new ToolResultEvent(runId, call.toolUseId(), terminal.status(), terminal.resultJson(), terminal.errorJson()));
-            }
-
-            PendingConfirm pendingConfirm = findPendingConfirm(terminals);
-            if (pendingConfirm != null) {
-                trajectoryStore.updateRunStatus(runId, RunStatus.WAITING_USER_CONFIRMATION, null);
-                sink.onFinal(new FinalEvent(
-                        runId,
-                        pendingConfirm.summary(),
-                        RunStatus.WAITING_USER_CONFIRMATION,
-                        "user_confirmation"
-                ));
-                return new AgentRunResult(runId, RunStatus.WAITING_USER_CONFIRMATION, pendingConfirm.summary());
-            }
-        }
-
-        trajectoryStore.updateRunStatus(runId, RunStatus.FAILED, "max turns exceeded");
-        redisToolStore.abort(runId, "max_turns_exceeded");
-        sink.onError(new ErrorEvent(runId, "max turns exceeded"));
-        return new AgentRunResult(runId, RunStatus.FAILED, null);
+        return turnOrchestrator.runUntilStop(runId, userId, runContext, params, sink);
     }
 
-    private ToolCommit commitAssistantToolCalls(String runId, String userId, LlmStreamResult result) {
-        List<ToolCallMessage> assistantToolCalls = new ArrayList<>();
-        List<ToolCall> allCalls = new ArrayList<>();
-        List<ToolCall> executable = new ArrayList<>();
-        List<ToolCall> precheckFailed = new ArrayList<>();
-        long seq = trajectoryStore.findToolCallsByRun(runId).size() + 1L;
-        for (ToolCallMessage raw : result.toolCalls()) {
-            String toolCallId = Ids.newId("tc");
-            ToolCall call;
-            try {
-                Tool tool = toolRegistry.resolve(raw.name());
-                ToolValidation validation = tool.validate(new ToolUseContext(runId, userId), new ToolUse(raw.toolUseId(), raw.name(), raw.argsJson()));
-                if (validation.accepted()) {
-                    call = new ToolCall(
-                            runId,
-                            toolCallId,
-                            seq++,
-                            raw.toolUseId(),
-                            raw.name(),
-                            tool.schema().name(),
-                            validation.normalizedArgsJson(),
-                            tool.schema().isConcurrent(),
-                            tool.schema().idempotent(),
-                            false,
-                            null
-                    );
-                    executable.add(call);
-                    assistantToolCalls.add(new ToolCallMessage(raw.toolUseId(), tool.schema().name(), validation.normalizedArgsJson()));
-                } else {
-                    call = new ToolCall(
-                            runId,
-                            toolCallId,
-                            seq++,
-                            raw.toolUseId(),
-                            raw.name(),
-                            tool.schema().name(),
-                            raw.argsJson(),
-                            tool.schema().isConcurrent(),
-                            tool.schema().idempotent(),
-                            true,
-                            validation.errorJson()
-                    );
-                    precheckFailed.add(call);
-                    assistantToolCalls.add(new ToolCallMessage(raw.toolUseId(), tool.schema().name(), raw.argsJson()));
-                }
-            } catch (Exception e) {
-                call = new ToolCall(
-                        runId,
-                        toolCallId,
-                        seq++,
-                        raw.toolUseId(),
-                        raw.name(),
-                        raw.name(),
-                        raw.argsJson(),
-                        false,
-                        false,
-                        true,
-                        errorJson("unknown_or_invalid_tool", e.getMessage())
-                );
-                precheckFailed.add(call);
-                assistantToolCalls.add(raw);
-            }
-            allCalls.add(call);
-        }
-        trajectoryStore.appendAssistantAndToolCalls(
-                runId,
-                LlmMessage.assistant(Ids.newId("msg"), result.content(), assistantToolCalls),
-                allCalls
-        );
-        return new ToolCommit(allCalls, executable, precheckFailed);
-    }
-
-    private PendingConfirm findPendingConfirm(List<ToolTerminal> terminals) {
-        for (ToolTerminal terminal : terminals) {
-            if (terminal.resultJson() == null || terminal.resultJson().isBlank()) {
-                continue;
-            }
-            try {
-                JsonNode root = objectMapper.readTree(terminal.resultJson());
-                if ("PENDING_CONFIRM".equals(root.path("actionStatus").asText())) {
-                    return new PendingConfirm(root.path("summary").asText("请确认是否继续。"));
-                }
-            } catch (Exception ignored) {
-                // Non-JSON tool results are allowed; they simply cannot request confirmation.
-            }
-        }
-        return null;
-    }
-
-    private boolean isRejectingConfirmation(String content) {
-        if (content == null) {
-            return false;
-        }
-        String normalized = content.toLowerCase();
-        return normalized.contains("不取消")
-                || normalized.contains("不用取消")
-                || normalized.contains("别取消")
-                || normalized.contains("算了")
-                || normalized.contains("不要了")
-                || normalized.contains("放弃")
-                || normalized.contains("cancel that")
-                || normalized.contains("do not cancel")
-                || normalized.contains("don't cancel")
-                || normalized.contains("no");
-    }
-
-    private String errorJson(String type, String message) {
+    private void createRunAndContext(String runId, String userId, RunContext runContext) {
+        boolean runCreated = false;
         try {
-            return objectMapper.writeValueAsString(new LinkedHashMap<>(Map.of(
-                    "type", type,
-                    "message", message == null ? "" : message
-            )));
-        } catch (Exception e) {
-            return "{\"type\":\"" + type + "\"}";
+            trajectoryStore.createRun(runId, userId);
+            runCreated = true;
+            runContextStore.create(runContext);
+        } catch (RuntimeException e) {
+            if (runCreated) {
+                markRunInitializationFailed(runId, e);
+            }
+            throw e;
         }
     }
 
-    private record ToolCommit(List<ToolCall> allCalls, List<ToolCall> executableCalls, List<ToolCall> precheckFailedCalls) {
+    private void markRunInitializationFailed(String runId, RuntimeException cause) {
+        try {
+            stateMachine.markInitializationFailed(runId, "run context initialization failed");
+        } catch (RuntimeException updateFailure) {
+            log.warn("failed to mark run initialization failure runId={} cause={}", runId, cause.getMessage(), updateFailure);
+        }
     }
 
-    private record PendingConfirm(String summary) {
+    private int effectiveMaxTurns(LlmParams params) {
+        return params == null
+                ? properties.getAgentLoop().getMaxTurns()
+                : params.effectiveMaxTurns(properties.getAgentLoop().getMaxTurns());
+    }
+
+    private String effectiveModel(LlmParams params) {
+        if (params != null && params.model() != null && !params.model().isBlank()) {
+            return params.model();
+        }
+        return properties.getLlm().getDeepseek().getDefaultModel();
+    }
+
+    private List<Tool> effectiveAllowedTools(Set<String> allowedToolNames) {
+        Map<String, Tool> defaultAllowed = properties.getDefaultAllowedTools().stream()
+                .map(toolRegistry::resolve)
+                .collect(Collectors.toMap(
+                        tool -> ToolRegistry.canonicalize(tool.schema().name()),
+                        Function.identity(),
+                        (left, right) -> left,
+                        LinkedHashMap::new
+                ));
+        if (allowedToolNames == null) {
+            return defaultAllowed.values().stream()
+                    .sorted(Comparator.comparing(tool -> tool.schema().name()))
+                    .toList();
+        }
+        Set<String> requested = allowedToolNames.stream()
+                .map(ToolRegistry::canonicalize)
+                .collect(Collectors.toSet());
+        return defaultAllowed.entrySet().stream()
+                .filter(entry -> requested.contains(entry.getKey()))
+                .map(Map.Entry::getValue)
+                .sorted(Comparator.comparing(tool -> tool.schema().name()))
+                .toList();
+    }
+
+    private List<String> effectiveAllowedToolNames(List<Tool> allowedTools) {
+        return allowedTools.stream()
+                .map(tool -> tool.schema().name())
+                .toList();
+    }
+
+    private List<Tool> toolsFromContext(RunContext runContext) {
+        return runContext.effectiveAllowedTools().stream()
+                .map(toolRegistry::resolve)
+                .toList();
+    }
+
+    private void validateRunContext(RunContext runContext) {
+        if (runContext.model() == null || runContext.model().isBlank()) {
+            throw new IllegalStateException("run context model missing: " + runContext.runId());
+        }
+        if (runContext.maxTurns() <= 0) {
+            throw new IllegalStateException("run context maxTurns invalid: " + runContext.runId());
+        }
+        toolsFromContext(runContext);
+    }
+
+    private AgentRunResult transitionTerminal(String runId, RunStatus status, String error, String finalText) {
+        RunStateMachine.TransitionResult result = stateMachine.completeFromRunning(runId, status, error);
+        if (result.changed()) {
+            return new AgentRunResult(runId, status, finalText);
+        }
+        RunStatus current = result.status();
+        log.warn("agent terminal transition lost race targetStatus={} currentStatus={}", status, current);
+        return new AgentRunResult(runId, current, null);
     }
 }
