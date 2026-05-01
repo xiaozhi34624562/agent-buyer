@@ -549,11 +549,28 @@ V2 必须按 `V2.0 -> V2.1 -> V2.2` 顺序推进，里程碑内部按 `task.md` 
 - `java-alibaba-review`：多轮 review 后无未解决 P0/P1/P2；确认首次 budget 拒绝、fallback、provider retry、summary provider call 四条 attribution/budget 链路闭合。
 - 状态：DONE。
 
-### V20-11 PENDING
+### V20-11 DONE
 
 - 写入范围：`*IntegrationTest` 系列；不动业务代码。
 - 前置：`V20-05`、`V20-10`。
 - 关注点：测试必须覆盖 RunContext provider 复用、fallback 安全边界、50K context compact、summary fields、PAUSED 迁移、budget exceeded。
+
+启动记录：
+
+- 启动时间：2026-05-02 00:31 CST。
+- 工程判断：V20-11 以集成/负向测试为主，不主动重构生产代码；只有测试串联后暴露真实行为缺口时才修业务实现。
+- 分工：主 agent 负责梳理现有覆盖、补 provider/context/budget 的集成测试并最终验收；sub agent 负责独立补充或审视 V2.0 场景覆盖；review agent 使用 `java-alibaba-review` 做最终代码审核。
+
+实现记录：
+
+- 新增 provider selection 复用集成测试：paused run continuation 走 `DefaultAgentLoop -> AgentTurnOrchestrator -> LlmAttemptService`，并断言 provider/model 来自已持久化 RunContext，而不是请求或当前配置默认值。
+- 新增 50K context compact 串联测试：在默认级阈值下验证 large result spill、micro compact、summary compact 依次发生，provider view 仍通过 tool call/tool result 配对校验，summary JSON 保留 `summaryText/businessFacts/toolFacts/openQuestions/compactedMessageIds`。
+- TDD 红灯：首次 50K 用例期望 summary 压掉旧 tool block，但测试数据的最近 3 条消息太短，`recentMessageBudgetTokens=2000` 按设计会继续保留前一个小 block，导致只压缩了旧 user message。
+- 修复方式：让最近 3 条消息本身超过 2000 token，真实覆盖“最后 3 条保留后不再继续向前保留”的边界；重跑 targeted 绿灯。
+- targeted 绿灯：`MYSQL_PASSWORD=*** mvn -Dtest=com.ai.agent.llm.ContextViewBuilderTest,com.ai.agent.api.V20ProviderSelectionIntegrationTest,com.ai.agent.api.LlmAttemptServiceTest,com.ai.agent.api.AgentTurnOrchestratorBudgetTest,com.ai.agent.api.RunStateMachineTest,com.ai.agent.llm.QwenProviderAdapterTest,com.ai.agent.llm.QwenCompatibilityProfileTest test`，35 tests，0 failures，`BUILD SUCCESS`。
+- `java-alibaba-review`：无 P0/P1/P2；P3 建议收窄 provider selection 测试类名，已从 `V20ProviderFallbackIntegrationTest` 改为 `V20ProviderSelectionIntegrationTest`。
+- 全量验证：`MYSQL_PASSWORD=*** mvn test`，150 tests，0 failures，0 errors，`BUILD SUCCESS`。
+- 状态：DONE。
 
 ### V20-12 PENDING
 

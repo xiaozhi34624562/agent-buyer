@@ -2,7 +2,9 @@ package com.ai.agent.llm;
 
 import com.ai.agent.config.AgentProperties;
 import com.ai.agent.tool.ToolCall;
+import com.ai.agent.trajectory.ContextCompactionDraft;
 import com.ai.agent.trajectory.TrajectoryReader;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
@@ -189,6 +191,69 @@ class ContextViewBuilderTest {
         assertThat(view.compactions().get(1).compactedMessageIds()).containsExactly("t-old");
     }
 
+    @Test
+    void compactsFiftyThousandTokenProviderViewWithoutBreakingToolPairing() throws Exception {
+        FakeTrajectoryReader reader = new FakeTrajectoryReader();
+        String rawLargeToolResultContent = exactTokenText(2_100);
+        LlmMessage rawLargeToolResult = LlmMessage.tool("t-old", "call_old", rawLargeToolResultContent);
+        reader.messages.add(LlmMessage.system("s1", "system prompt"));
+        reader.messages.add(LlmMessage.user("u1", "first user message"));
+        reader.messages.add(LlmMessage.assistant("a1", "second assistant message", List.of()));
+        reader.messages.add(LlmMessage.user("u2", "third user message"));
+        reader.messages.add(LlmMessage.user("u-old-business", exactTokenText(55_000)));
+        reader.messages.add(LlmMessage.assistant("a-tool", null, List.of(new ToolCallMessage("call_old", "query_order", "{}"))));
+        reader.messages.add(rawLargeToolResult);
+        reader.messages.add(LlmMessage.user("u-recent-1", exactTokenText(800)));
+        reader.messages.add(LlmMessage.assistant("a-recent-2", exactTokenText(800), List.of()));
+        reader.messages.add(LlmMessage.user("u-recent-3", exactTokenText(800)));
+        AgentProperties properties = new AgentProperties();
+        properties.getAgentLoop().setHardTokenCap(30_000);
+        properties.getContext().setLargeResultThresholdTokens(2_000);
+        properties.getContext().setLargeResultHeadTokens(200);
+        properties.getContext().setLargeResultTailTokens(200);
+        properties.getContext().setMicroCompactThresholdTokens(50_000);
+        properties.getContext().setSummaryCompactThresholdTokens(30_000);
+        properties.getContext().setRecentMessageBudgetTokens(2_000);
+        ObjectMapper objectMapper = new ObjectMapper();
+        ContextViewBuilder builder = new ContextViewBuilder(
+                reader,
+                new TranscriptPairValidator(),
+                new LargeResultSpiller(properties, new TokenEstimator()),
+                new MicroCompactor(properties, new TokenEstimator()),
+                new SummaryCompactor(
+                        properties,
+                        new TokenEstimator(),
+                        new DeterministicSummaryGenerator(objectMapper),
+                        objectMapper
+                )
+        );
+
+        ProviderContextView view = builder.build("run-50k");
+
+        new TranscriptPairValidator().validate(view.messages());
+        assertThat(view.compactions()).extracting(ContextCompactionDraft::strategy)
+                .containsExactly("LARGE_RESULT_SPILL", "MICRO_COMPACT", "SUMMARY_COMPACT");
+        assertThat(view.compactions().get(0).compactedMessageIds()).containsExactly("t-old");
+        assertThat(view.compactions().get(1).compactedMessageIds()).containsExactly("t-old");
+        assertThat(view.compactions().get(2).compactedMessageIds())
+                .containsExactly("u-old-business", "a-tool", "t-old");
+        LlmMessage summaryMessage = view.messages().stream()
+                .filter(message -> Boolean.TRUE.equals(message.extras().get("compactSummary")))
+                .findFirst()
+                .orElseThrow();
+        JsonNode summary = objectMapper.readTree(summaryMessage.content());
+        assertThat(summary.get("summaryText").isTextual()).isTrue();
+        assertThat(summary.get("businessFacts").isArray()).isTrue();
+        assertThat(summary.get("toolFacts").isArray()).isTrue();
+        assertThat(summary.get("openQuestions").isArray()).isTrue();
+        List<String> compactedIds = new ArrayList<>();
+        summary.get("compactedMessageIds").forEach(id -> compactedIds.add(id.asText()));
+        assertThat(compactedIds)
+                .containsExactly("u-old-business", "a-tool", "t-old");
+        assertThat(rawLargeToolResult.content()).isEqualTo(rawLargeToolResultContent);
+        assertThat(reader.messages.get(6).content()).isEqualTo(rawLargeToolResultContent);
+    }
+
     private static LargeResultSpiller noOpSpiller() {
         AgentProperties properties = new AgentProperties();
         properties.getContext().setLargeResultThresholdTokens(Integer.MAX_VALUE);
@@ -219,6 +284,17 @@ class ContextViewBuilderTest {
                 builder.append(' ');
             }
             builder.append("tok").append(i);
+        }
+        return builder.toString();
+    }
+
+    private static String exactTokenText(int tokenCount) {
+        StringBuilder builder = new StringBuilder(tokenCount * 5);
+        for (int i = 0; i < tokenCount; i++) {
+            if (i > 0) {
+                builder.append(' ');
+            }
+            builder.append("word");
         }
         return builder.toString();
     }
