@@ -9,6 +9,7 @@ MYSQL_PASSWORD="${MYSQL_PASSWORD:-agent_buyer_demo}"
 MYSQL_PWD="${MYSQL_PASSWORD}" mysql -u"${MYSQL_USER}" -h"${MYSQL_HOST}" -P"${MYSQL_PORT}" -D agent_buyer <<'SQL'
 UPDATE business_order
 SET status = 'PAID',
+    created_at = DATE_SUB(CURRENT_TIMESTAMP(3), INTERVAL 1 DAY),
     cancel_reason = NULL,
     cancelled_at = NULL
 WHERE order_id = 'O-1001';

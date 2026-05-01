@@ -881,6 +881,25 @@ V2.2 必须在 `V21-GATE` 完成后启动。占位列表：
 - V22-GATE re-review：未发现 P0/P1/P2；V2.2 hardening gate 放行。
 - 状态：`V22-01` ~ `V22-15` 与 `V22-GATE` 均置为 DONE。V2.0、V2.1、V2.2 全部完成。
 
+### Real LLM E2E 验证
+
+- 时间：2026-05-02 05:24 CST。
+- 新增 `scripts/real-llm-e2e.sh`，作为不进入默认 `mvn test` 的真实 provider 端到端 smoke。
+- 覆盖链路：
+  - 独立端口启动 Spring Boot 应用。
+  - 重置 demo 订单 `O-1001`。
+  - 真实调用 DeepSeek `deepseek-reasoner`。
+  - 第一段 SSE 完成 `query_order -> cancel_order dry-run -> WAITING_USER_CONFIRMATION`。
+  - 第二段 SSE 用户确认后完成 `cancel_order confirm -> SUCCEEDED`。
+  - 查询 trajectory，并校验 MySQL 中 `O-1001.status=CANCELLED`。
+- 开发中踩坑：
+  - `reset-demo-order.sh` 只重置订单状态，没有重置 `created_at`，导致“昨天订单”随时间漂移后查不到。修复为每次重置时同步设置 `created_at = CURRENT_TIMESTAMP - 1 DAY`。
+  - `ConfirmationIntentService` 只接受精确 `确认取消`，真实用户和 README 示例里的 `确认取消这个订单` 会被判定为 ambiguous。修复为显式支持常见中文确认取消短语，并补单测。
+- 验证：
+  - `mvn -q -Dtest=ConfirmationIntentServiceTest test`：通过。
+  - `MYSQL_PASSWORD=*** DEEPSEEK_API_KEY=*** QWEN_API_KEY=*** ./scripts/real-llm-e2e.sh`：通过。
+  - 本次通过产物：`/tmp/agent-buyer-real-llm-e2e/20260502-052446`。
+
 ## V2 踩坑记录
 
 - Flyway 已应用的 migration 不要回改 checksum；本次 V8 已在本地 DB 应用后需要补字段，正确做法是保留 V8、追加 V8_1 幂等迁移。
