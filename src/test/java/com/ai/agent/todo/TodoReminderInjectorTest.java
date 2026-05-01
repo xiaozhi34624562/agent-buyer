@@ -1,5 +1,6 @@
 package com.ai.agent.todo;
 
+import com.ai.agent.config.AgentProperties;
 import com.ai.agent.llm.LlmMessage;
 import com.ai.agent.llm.MessageRole;
 import org.junit.jupiter.api.Test;
@@ -14,7 +15,7 @@ import static org.mockito.Mockito.when;
 
 class TodoReminderInjectorTest {
     private final TodoStore store = mock(TodoStore.class);
-    private final TodoReminderInjector injector = new TodoReminderInjector(store);
+    private final TodoReminderInjector injector = new TodoReminderInjector(new AgentProperties(), store);
 
     @Test
     void skipsTurnsThatAreNotReminderInterval() {

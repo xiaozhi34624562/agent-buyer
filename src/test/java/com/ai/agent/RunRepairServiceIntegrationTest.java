@@ -70,7 +70,7 @@ class RunRepairServiceIntegrationTest {
                 .set(AgentRunEntity::getUpdatedAt, LocalDateTime.now().minusMinutes(5))
                 .eq(AgentRunEntity::getRunId, runId));
 
-        repairService.repairNowForTests();
+        repairService.repairStartupOrphans();
 
         assertThat(trajectoryStore.findRunStatus(runId)).isEqualTo(RunStatus.FAILED_RECOVERED);
         assertThat(trajectoryReader.loadTrajectorySnapshot(runId).toolResults()).hasSize(1);

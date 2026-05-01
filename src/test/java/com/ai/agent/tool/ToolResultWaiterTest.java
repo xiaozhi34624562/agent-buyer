@@ -1,6 +1,7 @@
 package com.ai.agent.tool;
 
 import com.ai.agent.config.AgentProperties;
+import com.ai.agent.support.TestObjectProvider;
 import com.ai.agent.tool.redis.RedisToolStore;
 import com.ai.agent.util.Ids;
 import org.junit.jupiter.api.Test;
@@ -24,7 +25,7 @@ class ToolResultWaiterTest {
         AgentProperties properties = new AgentProperties();
         properties.getRuntime().setToolResultPollIntervalMs(5_000);
         ToolResultPubSub pubSub = mock(ToolResultPubSub.class);
-        ToolResultWaiter waiter = new ToolResultWaiter(store, properties, pubSub);
+        ToolResultWaiter waiter = new ToolResultWaiter(store, properties, TestObjectProvider.of(pubSub));
         ToolCall call = call("run-1");
         CompletableFuture<Void> notified = new CompletableFuture<>();
         AtomicBoolean terminalReady = new AtomicBoolean(false);
@@ -60,7 +61,7 @@ class ToolResultWaiterTest {
         AgentProperties properties = new AgentProperties();
         properties.getRuntime().setToolResultPollIntervalMs(200);
         ToolResultPubSub pubSub = mock(ToolResultPubSub.class);
-        ToolResultWaiter waiter = new ToolResultWaiter(store, properties, pubSub);
+        ToolResultWaiter waiter = new ToolResultWaiter(store, properties, TestObjectProvider.of(pubSub));
         ToolCall first = call("run-1", 1);
         ToolCall second = call("run-1", 2);
         CompletableFuture<Void> firstNotified = CompletableFuture.completedFuture(null);

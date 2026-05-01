@@ -15,10 +15,6 @@ public final class TodoReminderInjector {
     private final AgentProperties properties;
     private final TodoStore store;
 
-    public TodoReminderInjector(TodoStore store) {
-        this(new AgentProperties(), store);
-    }
-
     @Autowired
     public TodoReminderInjector(AgentProperties properties, TodoStore store) {
         this.properties = properties == null ? new AgentProperties() : properties;

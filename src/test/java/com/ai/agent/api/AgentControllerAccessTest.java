@@ -11,6 +11,13 @@ import com.ai.agent.llm.LlmStreamResult;
 import com.ai.agent.llm.PromptAssembler;
 import com.ai.agent.llm.TranscriptPairValidator;
 import com.ai.agent.persistence.entity.AgentRunEntity;
+import com.ai.agent.support.TestObjectProvider;
+import com.ai.agent.subagent.ChildReleaseReason;
+import com.ai.agent.subagent.ChildRunRef;
+import com.ai.agent.subagent.ChildRunRegistry;
+import com.ai.agent.subagent.ParentLinkStatus;
+import com.ai.agent.subagent.ReserveChildCommand;
+import com.ai.agent.subagent.ReserveChildResult;
 import com.ai.agent.tool.CancelReason;
 import com.ai.agent.tool.ConfirmTokenStore;
 import com.ai.agent.tool.RunEventSinkRegistry;
@@ -84,7 +91,11 @@ class AgentControllerAccessTest {
                 new RedisKeys(new AgentProperties()),
                 redisTemplate
         );
-        RunAccessManager runAccessManager = new RunAccessManager(trajectoryStore, continuationLockService);
+        RunAccessManager runAccessManager = new RunAccessManager(
+                trajectoryStore,
+                continuationLockService,
+                redisToolStore
+        );
         AgentRunApplicationService applicationService = new AgentRunApplicationService(
                 agentLoop,
                 new RunAdmissionController(),
@@ -94,7 +105,8 @@ class AgentControllerAccessTest {
                 continuationLockService,
                 redisToolStore,
                 new ToolResultCloser(trajectoryStore, trajectoryStore),
-                new TrajectoryQueryService(trajectoryStore, new ObjectMapper())
+                new TrajectoryQueryService(trajectoryStore, new ObjectMapper()),
+                interruptService(runAccessManager)
         );
         AgentController controller = new AgentController(
                 applicationService,
@@ -104,6 +116,19 @@ class AgentControllerAccessTest {
                 null
         );
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+    }
+
+    private RunInterruptService interruptService(RunAccessManager runAccessManager) {
+        return new RunInterruptService(
+                new AgentProperties(),
+                runAccessManager,
+                new RunStateMachine(trajectoryStore),
+                redisToolStore,
+                new ToolResultCloser(trajectoryStore, trajectoryStore),
+                new RunEventSinkRegistry(),
+                new EmptyChildRunRegistry(),
+                trajectoryStore
+        );
     }
 
     @Test
@@ -410,11 +435,15 @@ class AgentControllerAccessTest {
                 new RedisKeys(new AgentProperties()),
                 redis
         );
-        RunAccessManager runAccessManager = new RunAccessManager(store, continuationLockService);
+        RunAccessManager runAccessManager = new RunAccessManager(
+                store,
+                continuationLockService,
+                new FakeRedisToolStore()
+        );
         RunAccessManager.ContinuationPermit permit = runAccessManager.acquireContinuation("owner", runId);
         store.statusByRun.put(runId, RunStatus.CANCELLED);
         CountingLlmProvider provider = new CountingLlmProvider();
-        DefaultAgentLoop loop = new DefaultAgentLoop(
+        DefaultAgentLoop loop = AgentLoopTestFactory.create(
                 new AgentProperties(),
                 new PromptAssembler(userId -> new UserProfile(userId, "Owner", null, null, null, "buyer")),
                 provider,
@@ -423,7 +452,7 @@ class AgentControllerAccessTest {
                 (ToolRuntime) (ignoredRunId, call) -> {
                 },
                 new FakeRedisToolStore(),
-                new ToolResultWaiter(new FakeRedisToolStore()),
+                new ToolResultWaiter(new FakeRedisToolStore(), new AgentProperties(), TestObjectProvider.empty()),
                 store,
                 store,
                 new NoopRunContextStore(),
@@ -463,7 +492,7 @@ class AgentControllerAccessTest {
         provider.beforeReturn = request -> store.statusByRun.put(request.runId(), RunStatus.CANCELLED);
         AgentProperties properties = new AgentProperties();
         properties.setDefaultAllowedTools(List.of());
-        DefaultAgentLoop loop = new DefaultAgentLoop(
+        DefaultAgentLoop loop = AgentLoopTestFactory.create(
                 properties,
                 new PromptAssembler(userId -> new UserProfile(userId, "Owner", null, null, null, "buyer")),
                 provider,
@@ -472,12 +501,16 @@ class AgentControllerAccessTest {
                 (ToolRuntime) (ignoredRunId, call) -> {
                 },
                 new FakeRedisToolStore(),
-                new ToolResultWaiter(new FakeRedisToolStore()),
+                new ToolResultWaiter(new FakeRedisToolStore(), properties, TestObjectProvider.empty()),
                 store,
                 store,
                 new NoopRunContextStore(),
                 new RunEventSinkRegistry(),
-                new RunAccessManager(store, new ContinuationLockService(new RedisKeys(properties), redis)),
+                new RunAccessManager(
+                        store,
+                        new ContinuationLockService(new RedisKeys(properties), redis),
+                        new FakeRedisToolStore()
+                ),
                 new ConfirmTokenStore(properties, redis, new com.fasterxml.jackson.databind.ObjectMapper()),
                 new com.fasterxml.jackson.databind.ObjectMapper()
         );
@@ -796,6 +829,28 @@ class AgentControllerAccessTest {
         @Override
         public boolean abortRequested(String runId) {
             return abortCount > 0;
+        }
+    }
+
+    private static final class EmptyChildRunRegistry implements ChildRunRegistry {
+        @Override
+        public ReserveChildResult reserve(ReserveChildCommand command) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean release(
+                String parentRunId,
+                String childRunId,
+                ChildReleaseReason reason,
+                ParentLinkStatus parentLinkStatus
+        ) {
+            return false;
+        }
+
+        @Override
+        public List<ChildRunRef> findActiveChildren(String parentRunId) {
+            return List.of();
         }
     }
 

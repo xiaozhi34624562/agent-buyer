@@ -21,6 +21,7 @@ import com.ai.agent.llm.TranscriptPairValidator;
 import com.ai.agent.skill.SkillCommandResolver;
 import com.ai.agent.skill.SkillPathResolver;
 import com.ai.agent.skill.SkillRegistry;
+import com.ai.agent.support.TestObjectProvider;
 import com.ai.agent.tool.CancelReason;
 import com.ai.agent.tool.StartedTool;
 import com.ai.agent.tool.ToolCall;
@@ -424,7 +425,7 @@ class AgentTurnOrchestratorBudgetTest {
                         (ToolRuntime) (runId, call) -> {
                         },
                         new FakeRedisToolStore(),
-                        new ToolResultWaiter(new FakeRedisToolStore()),
+                        new ToolResultWaiter(new FakeRedisToolStore(), properties, TestObjectProvider.empty()),
                         trajectoryStore,
                         trajectoryStore,
                         new ToolResultCloser(trajectoryStore, trajectoryStore),

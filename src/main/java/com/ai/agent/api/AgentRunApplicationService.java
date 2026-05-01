@@ -50,31 +50,6 @@ public final class AgentRunApplicationService {
         this.interruptService = interruptService;
     }
 
-    public AgentRunApplicationService(
-            AgentLoop agentLoop,
-            RunAdmissionController admissionController,
-            RedisRateLimiter rateLimiter,
-            AgentRequestPolicy requestPolicy,
-            RunAccessManager runAccessManager,
-            ContinuationLockService continuationLockService,
-            RedisToolStore redisToolStore,
-            ToolResultCloser toolResultCloser,
-            TrajectoryQueryService trajectoryQueryService
-    ) {
-        this(
-                agentLoop,
-                admissionController,
-                rateLimiter,
-                requestPolicy,
-                runAccessManager,
-                continuationLockService,
-                redisToolStore,
-                toolResultCloser,
-                trajectoryQueryService,
-                null
-        );
-    }
-
     public RunStreamPlan createRun(String userId, AgentRunRequest request) {
         requestPolicy.validateCreateRun(request);
         if (!admissionController.isAccepting()) {
@@ -122,9 +97,6 @@ public final class AgentRunApplicationService {
     }
 
     public RunInterruptService.InterruptRunResponse interruptRun(String userId, String runId) {
-        if (interruptService == null) {
-            throw new ServiceUnavailableException();
-        }
         log.info("agent interrupt requested runId={} userId={}", runId, userId);
         return interruptService.interrupt(userId, runId);
     }

@@ -43,7 +43,11 @@ class RunAccessManagerTest {
                 new RedisKeys(new AgentProperties()),
                 redisTemplate
         );
-        runAccessManager = new RunAccessManager(trajectoryStore, continuationLockService);
+        runAccessManager = new RunAccessManager(
+                trajectoryStore,
+                continuationLockService,
+                new FakeRedisToolStore(events)
+        );
     }
 
     @Test
@@ -107,7 +111,9 @@ class RunAccessManagerTest {
                 "findOwner:" + runId,
                 "acquire:" + runId,
                 "findStatus:" + runId,
-                "transition:" + runId + ":PAUSED->RUNNING"
+                "clearInterrupt:" + runId,
+                "transition:" + runId + ":PAUSED->RUNNING",
+                "interruptRequested:" + runId
         );
         assertThat(trajectoryStore.events).doesNotContain("release:" + runId);
     }

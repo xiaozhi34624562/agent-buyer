@@ -95,8 +95,4 @@ public final class RunRepairService {
             );
         }
     }
-
-    public void repairNowForTests() {
-        repairStartupOrphans();
-    }
 }

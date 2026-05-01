@@ -25,10 +25,6 @@ public final class RunAccessManager {
         this.stateMachine = new RunStateMachine(trajectoryStore);
     }
 
-    public RunAccessManager(TrajectoryStore trajectoryStore, ContinuationLockService continuationLockService) {
-        this(trajectoryStore, continuationLockService, null);
-    }
-
     public void assertOwner(String runId, String userId) {
         String owner = trajectoryStore.findRunUserId(runId);
         if (owner == null) {

@@ -20,6 +20,7 @@ import com.ai.agent.llm.ProviderErrorType;
 import com.ai.agent.llm.SummaryCompactor;
 import com.ai.agent.llm.TokenEstimator;
 import com.ai.agent.llm.TranscriptPairValidator;
+import com.ai.agent.support.TestObjectProvider;
 import com.ai.agent.tool.CancelReason;
 import com.ai.agent.tool.ConfirmTokenStore;
 import com.ai.agent.tool.RunEventSinkRegistry;
@@ -88,7 +89,8 @@ class V20ProviderSelectionIntegrationTest {
         FakeStringRedisTemplate redisTemplate = new FakeStringRedisTemplate();
         RunAccessManager runAccessManager = new RunAccessManager(
                 trajectoryStore,
-                new ContinuationLockService(new RedisKeys(properties), redisTemplate)
+                new ContinuationLockService(new RedisKeys(properties), redisTemplate),
+                new FakeRedisToolStore()
         );
         DefaultAgentLoop loop = new DefaultAgentLoop(
                 properties,
@@ -157,7 +159,7 @@ class V20ProviderSelectionIntegrationTest {
                         (ToolRuntime) (ignoredRunId, call) -> {
                         },
                         redisToolStore,
-                        new ToolResultWaiter(redisToolStore),
+                        new ToolResultWaiter(redisToolStore, properties, TestObjectProvider.empty()),
                         trajectoryStore,
                         trajectoryStore,
                         new ToolResultCloser(trajectoryStore, trajectoryStore),

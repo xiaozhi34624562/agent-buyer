@@ -23,10 +23,6 @@ public final class ToolResultWaiter {
     private final AgentProperties properties;
     private final ToolResultPubSub pubSub;
 
-    public ToolResultWaiter(RedisToolStore store) {
-        this(store, new AgentProperties(), (ToolResultPubSub) null);
-    }
-
     @Autowired
     public ToolResultWaiter(
             RedisToolStore store,
@@ -36,7 +32,7 @@ public final class ToolResultWaiter {
         this(store, properties, pubSubProvider == null ? null : pubSubProvider.getIfAvailable());
     }
 
-    ToolResultWaiter(RedisToolStore store, AgentProperties properties, ToolResultPubSub pubSub) {
+    private ToolResultWaiter(RedisToolStore store, AgentProperties properties, ToolResultPubSub pubSub) {
         this.store = store;
         this.properties = properties == null ? new AgentProperties() : properties;
         this.pubSub = pubSub;

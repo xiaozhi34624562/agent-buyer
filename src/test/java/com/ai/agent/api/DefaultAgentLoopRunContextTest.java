@@ -11,6 +11,7 @@ import com.ai.agent.llm.LlmStreamListener;
 import com.ai.agent.llm.LlmStreamResult;
 import com.ai.agent.llm.PromptAssembler;
 import com.ai.agent.llm.TranscriptPairValidator;
+import com.ai.agent.support.TestObjectProvider;
 import com.ai.agent.tool.CancelReason;
 import com.ai.agent.tool.ConfirmTokenStore;
 import com.ai.agent.tool.RunEventSinkRegistry;
@@ -57,9 +58,10 @@ class DefaultAgentLoopRunContextTest {
         CapturingProvider provider = new CapturingProvider(trajectoryStore);
         RunAccessManager runAccessManager = new RunAccessManager(
                 trajectoryStore,
-                new ContinuationLockService(new RedisKeys(properties), redisTemplate)
+                new ContinuationLockService(new RedisKeys(properties), redisTemplate),
+                new FakeRedisToolStore()
         );
-        DefaultAgentLoop loop = new DefaultAgentLoop(
+        DefaultAgentLoop loop = AgentLoopTestFactory.create(
                 properties,
                 new PromptAssembler(userId -> new UserProfile(userId, "Owner", null, null, null, "buyer")),
                 provider,
@@ -68,7 +70,7 @@ class DefaultAgentLoopRunContextTest {
                 (ToolRuntime) (ignoredRunId, call) -> {
                 },
                 new FakeRedisToolStore(),
-                new ToolResultWaiter(new FakeRedisToolStore()),
+                new ToolResultWaiter(new FakeRedisToolStore(), properties, TestObjectProvider.empty()),
                 trajectoryStore,
                 trajectoryStore,
                 runContextStore,
@@ -108,9 +110,10 @@ class DefaultAgentLoopRunContextTest {
         CapturingProvider provider = new CapturingProvider(trajectoryStore);
         RunAccessManager runAccessManager = new RunAccessManager(
                 trajectoryStore,
-                new ContinuationLockService(new RedisKeys(properties), redisTemplate)
+                new ContinuationLockService(new RedisKeys(properties), redisTemplate),
+                new FakeRedisToolStore()
         );
-        DefaultAgentLoop loop = new DefaultAgentLoop(
+        DefaultAgentLoop loop = AgentLoopTestFactory.create(
                 properties,
                 new PromptAssembler(userId -> new UserProfile(userId, "Owner", null, null, null, "buyer")),
                 provider,
@@ -119,7 +122,7 @@ class DefaultAgentLoopRunContextTest {
                 (ToolRuntime) (ignoredRunId, call) -> {
                 },
                 new FakeRedisToolStore(),
-                new ToolResultWaiter(new FakeRedisToolStore()),
+                new ToolResultWaiter(new FakeRedisToolStore(), properties, TestObjectProvider.empty()),
                 trajectoryStore,
                 trajectoryStore,
                 runContextStore,
@@ -150,9 +153,10 @@ class DefaultAgentLoopRunContextTest {
         CapturingProvider provider = new CapturingProvider(trajectoryStore);
         RunAccessManager runAccessManager = new RunAccessManager(
                 trajectoryStore,
-                new ContinuationLockService(new RedisKeys(properties), redisTemplate)
+                new ContinuationLockService(new RedisKeys(properties), redisTemplate),
+                new FakeRedisToolStore()
         );
-        DefaultAgentLoop loop = new DefaultAgentLoop(
+        DefaultAgentLoop loop = AgentLoopTestFactory.create(
                 properties,
                 new PromptAssembler(userId -> new UserProfile(userId, "Owner", null, null, null, "buyer")),
                 provider,
@@ -161,7 +165,7 @@ class DefaultAgentLoopRunContextTest {
                 (ToolRuntime) (ignoredRunId, call) -> {
                 },
                 new FakeRedisToolStore(),
-                new ToolResultWaiter(new FakeRedisToolStore()),
+                new ToolResultWaiter(new FakeRedisToolStore(), properties, TestObjectProvider.empty()),
                 trajectoryStore,
                 trajectoryStore,
                 runContextStore,
@@ -202,9 +206,10 @@ class DefaultAgentLoopRunContextTest {
         FakeStringRedisTemplate redisTemplate = new FakeStringRedisTemplate();
         RunAccessManager runAccessManager = new RunAccessManager(
                 trajectoryStore,
-                new ContinuationLockService(new RedisKeys(properties), redisTemplate)
+                new ContinuationLockService(new RedisKeys(properties), redisTemplate),
+                new FakeRedisToolStore()
         );
-        DefaultAgentLoop loop = new DefaultAgentLoop(
+        DefaultAgentLoop loop = AgentLoopTestFactory.create(
                 properties,
                 new PromptAssembler(userId -> new UserProfile(userId, "Owner", null, null, null, "buyer")),
                 new CapturingProvider(trajectoryStore),
@@ -213,7 +218,7 @@ class DefaultAgentLoopRunContextTest {
                 (ToolRuntime) (ignoredRunId, call) -> {
                 },
                 new FakeRedisToolStore(),
-                new ToolResultWaiter(new FakeRedisToolStore()),
+                new ToolResultWaiter(new FakeRedisToolStore(), properties, TestObjectProvider.empty()),
                 trajectoryStore,
                 trajectoryStore,
                 runContextStore,
@@ -250,9 +255,10 @@ class DefaultAgentLoopRunContextTest {
         FakeStringRedisTemplate redisTemplate = new FakeStringRedisTemplate();
         RunAccessManager runAccessManager = new RunAccessManager(
                 trajectoryStore,
-                new ContinuationLockService(new RedisKeys(properties), redisTemplate)
+                new ContinuationLockService(new RedisKeys(properties), redisTemplate),
+                new FakeRedisToolStore()
         );
-        DefaultAgentLoop loop = new DefaultAgentLoop(
+        DefaultAgentLoop loop = AgentLoopTestFactory.create(
                 properties,
                 new PromptAssembler(userId -> new UserProfile(userId, "Owner", null, null, null, "buyer")),
                 new CapturingProvider(trajectoryStore),
@@ -261,7 +267,7 @@ class DefaultAgentLoopRunContextTest {
                 (ToolRuntime) (ignoredRunId, call) -> {
                 },
                 new FakeRedisToolStore(),
-                new ToolResultWaiter(new FakeRedisToolStore()),
+                new ToolResultWaiter(new FakeRedisToolStore(), properties, TestObjectProvider.empty()),
                 trajectoryStore,
                 trajectoryStore,
                 runContextStore,
@@ -309,9 +315,10 @@ class DefaultAgentLoopRunContextTest {
         FakeStringRedisTemplate redisTemplate = new FakeStringRedisTemplate();
         RunAccessManager runAccessManager = new RunAccessManager(
                 trajectoryStore,
-                new ContinuationLockService(new RedisKeys(properties), redisTemplate)
+                new ContinuationLockService(new RedisKeys(properties), redisTemplate),
+                new FakeRedisToolStore()
         );
-        DefaultAgentLoop loop = new DefaultAgentLoop(
+        DefaultAgentLoop loop = AgentLoopTestFactory.create(
                 properties,
                 new PromptAssembler(userId -> new UserProfile(userId, "Owner", null, null, null, "buyer")),
                 new CapturingProvider(trajectoryStore),
@@ -320,7 +327,7 @@ class DefaultAgentLoopRunContextTest {
                 (ToolRuntime) (ignoredRunId, call) -> {
                 },
                 new FakeRedisToolStore(),
-                new ToolResultWaiter(new FakeRedisToolStore()),
+                new ToolResultWaiter(new FakeRedisToolStore(), properties, TestObjectProvider.empty()),
                 trajectoryStore,
                 trajectoryStore,
                 runContextStore,
@@ -369,9 +376,10 @@ class DefaultAgentLoopRunContextTest {
         CapturingProvider provider = new CapturingProvider(trajectoryStore);
         RunAccessManager runAccessManager = new RunAccessManager(
                 trajectoryStore,
-                new ContinuationLockService(new RedisKeys(properties), redisTemplate)
+                new ContinuationLockService(new RedisKeys(properties), redisTemplate),
+                new FakeRedisToolStore()
         );
-        DefaultAgentLoop loop = new DefaultAgentLoop(
+        DefaultAgentLoop loop = AgentLoopTestFactory.create(
                 properties,
                 new PromptAssembler(userId -> new UserProfile(userId, "Owner", null, null, null, "buyer")),
                 provider,
@@ -380,7 +388,7 @@ class DefaultAgentLoopRunContextTest {
                 (ToolRuntime) (ignoredRunId, call) -> {
                 },
                 new FakeRedisToolStore(),
-                new ToolResultWaiter(new FakeRedisToolStore()),
+                new ToolResultWaiter(new FakeRedisToolStore(), properties, TestObjectProvider.empty()),
                 trajectoryStore,
                 trajectoryStore,
                 runContextStore,
@@ -430,9 +438,10 @@ class DefaultAgentLoopRunContextTest {
         FakeStringRedisTemplate redisTemplate = new FakeStringRedisTemplate();
         RunAccessManager runAccessManager = new RunAccessManager(
                 trajectoryStore,
-                new ContinuationLockService(new RedisKeys(properties), redisTemplate)
+                new ContinuationLockService(new RedisKeys(properties), redisTemplate),
+                new FakeRedisToolStore()
         );
-        DefaultAgentLoop loop = new DefaultAgentLoop(
+        DefaultAgentLoop loop = AgentLoopTestFactory.create(
                 properties,
                 new PromptAssembler(userId -> new UserProfile(userId, "Owner", null, null, null, "buyer")),
                 new CapturingProvider(trajectoryStore),
@@ -441,7 +450,7 @@ class DefaultAgentLoopRunContextTest {
                 (ToolRuntime) (ignoredRunId, call) -> {
                 },
                 new FakeRedisToolStore(),
-                new ToolResultWaiter(new FakeRedisToolStore()),
+                new ToolResultWaiter(new FakeRedisToolStore(), properties, TestObjectProvider.empty()),
                 trajectoryStore,
                 trajectoryStore,
                 runContextStore,

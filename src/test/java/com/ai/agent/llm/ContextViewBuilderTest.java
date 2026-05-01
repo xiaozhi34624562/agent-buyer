@@ -336,7 +336,7 @@ class ContextViewBuilderTest {
                 noOpMicroCompactor(),
                 noOpSummaryCompactor(),
                 null,
-                new TodoReminderInjector(todoStore),
+                new TodoReminderInjector(new AgentProperties(), todoStore),
                 null,
                 new ObjectMapper()
         );

@@ -3,30 +3,15 @@ package com.ai.agent.api;
 import com.ai.agent.config.AgentProperties;
 import com.ai.agent.domain.RunStatus;
 import com.ai.agent.llm.LlmMessage;
-import com.ai.agent.llm.LlmProviderAdapter;
-import com.ai.agent.llm.LlmProviderAdapterRegistry;
-import com.ai.agent.llm.LargeResultSpiller;
-import com.ai.agent.llm.MicroCompactor;
 import com.ai.agent.llm.PromptAssembler;
-import com.ai.agent.llm.ContextViewBuilder;
-import com.ai.agent.llm.DeterministicSummaryGenerator;
-import com.ai.agent.llm.SummaryCompactor;
-import com.ai.agent.llm.TokenEstimator;
-import com.ai.agent.llm.TranscriptPairValidator;
 import com.ai.agent.tool.ConfirmTokenStore;
 import com.ai.agent.tool.RunEventSinkRegistry;
 import com.ai.agent.tool.Tool;
 import com.ai.agent.tool.ToolRegistry;
-import com.ai.agent.tool.ToolResultCloser;
-import com.ai.agent.tool.ToolResultWaiter;
-import com.ai.agent.tool.ToolRuntime;
-import com.ai.agent.tool.redis.RedisToolStore;
 import com.ai.agent.trajectory.RunContext;
 import com.ai.agent.trajectory.RunContextStore;
-import com.ai.agent.trajectory.TrajectoryReader;
 import com.ai.agent.trajectory.TrajectoryStore;
 import com.ai.agent.util.Ids;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -38,8 +23,6 @@ import java.util.Map;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -86,72 +69,6 @@ public final class DefaultAgentLoop implements AgentLoop {
         this.turnOrchestrator = turnOrchestrator;
         this.confirmationIntentService = confirmationIntentService;
         this.confirmTokenStore = confirmTokenStore;
-    }
-
-    DefaultAgentLoop(
-            AgentProperties properties,
-            PromptAssembler promptAssembler,
-            LlmProviderAdapter providerAdapter,
-            TranscriptPairValidator transcriptPairValidator,
-            ToolRegistry toolRegistry,
-            ToolRuntime toolRuntime,
-            RedisToolStore redisToolStore,
-            ToolResultWaiter toolResultWaiter,
-            TrajectoryStore trajectoryStore,
-            TrajectoryReader trajectoryReader,
-            RunContextStore runContextStore,
-            RunEventSinkRegistry sinkRegistry,
-            RunAccessManager runAccessManager,
-            ConfirmTokenStore confirmTokenStore,
-            ObjectMapper objectMapper
-    ) {
-        this(
-                properties,
-                promptAssembler,
-                toolRegistry,
-                trajectoryStore,
-                runContextStore,
-                sinkRegistry,
-                runAccessManager,
-                new AgentTurnOrchestrator(
-                        properties,
-                        new ContextViewBuilder(
-                                trajectoryReader,
-                                transcriptPairValidator,
-                                new LargeResultSpiller(properties, new TokenEstimator()),
-                                new MicroCompactor(properties, new TokenEstimator()),
-                                new SummaryCompactor(
-                                        properties,
-                                        new TokenEstimator(),
-                                        new DeterministicSummaryGenerator(objectMapper),
-                                        objectMapper
-                                )
-                        ),
-                        new LlmAttemptService(
-                                new LlmProviderAdapterRegistry(List.of(providerAdapter)),
-                                trajectoryStore,
-                                objectMapper,
-                                record -> null
-                        ),
-                        new ToolCallCoordinator(
-                                properties,
-                                toolRegistry,
-                                toolRuntime,
-                                redisToolStore,
-                                toolResultWaiter,
-                                trajectoryStore,
-                                trajectoryReader,
-                                new ToolResultCloser(trajectoryStore, trajectoryReader),
-                                objectMapper
-                        ),
-                        trajectoryReader,
-                        trajectoryStore,
-                        new RunStateMachine(trajectoryStore),
-                        new AgentExecutionBudget(properties, new LocalRunLlmCallBudgetStore())
-                ),
-                new ConfirmationIntentService(),
-                confirmTokenStore
-        );
     }
 
     @Override
@@ -379,23 +296,5 @@ public final class DefaultAgentLoop implements AgentLoop {
         RunStatus current = result.status();
         log.warn("agent terminal transition lost race targetStatus={} currentStatus={}", status, current);
         return new AgentRunResult(runId, current, null);
-    }
-
-    private static final class LocalRunLlmCallBudgetStore implements RunLlmCallBudgetStore {
-        private final Map<String, Long> countsByRun = new ConcurrentHashMap<>();
-
-        @Override
-        public Reservation reserveRunCall(String runId, int limit) {
-            AtomicBoolean accepted = new AtomicBoolean(false);
-            long next = countsByRun.compute(runId, (ignored, current) -> {
-                long used = current == null ? 0L : current;
-                if (used >= limit) {
-                    return used;
-                }
-                accepted.set(true);
-                return used + 1L;
-            });
-            return new Reservation(accepted.get(), next);
-        }
     }
 }
