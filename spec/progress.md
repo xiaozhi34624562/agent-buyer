@@ -924,6 +924,32 @@ V2.2 必须在 `V21-GATE` 完成后启动。占位列表：
   - `MYSQL_PASSWORD=*** DEEPSEEK_API_KEY=*** QWEN_API_KEY=*** ./scripts/real-llm-e2e.sh`：通过。
   - 本次通过产物：`/tmp/agent-buyer-real-llm-e2e/20260502-055204`。
 
+### Package 架构重排
+
+- 时间：2026-05-02 06:10 CST。
+- 背景：V2 完成后，`api`、`tool`、`llm` 等 package 聚合了过多职责，读者打开目录难以判断入口、loop、runtime、provider、model、tool 实现的边界。
+- 重排目标：
+  - `api` 拆为 `web`、`application`、`loop`、`budget`。
+  - `tool` 拆为 `core`、`model`、`registry`、`runtime`、`runtime.redis`、`security`、`builtin.order`。
+  - `llm` 拆为 `model`、`provider`、`provider.deepseek`、`provider.qwen`、`context`、`compact`、`summary`、`toolcall`、`transcript`。
+  - `trajectory` 拆为 `model`、`port`、`store`、`query`、`dto`。
+  - `skill`、`subagent`、`todo` 按 `core/model/runtime/tool/profile/registry` 轻拆。
+  - `business` 拆为 `business.order` 与 `business.user`。
+- 工程约束：只做 package/import 移动，不改业务逻辑、不改变 HTTP/API/tool schema/DB schema 行为。
+- 开发中踩坑：
+  - 原 `SkillNames` 是 package-private，同包拆分后 `SkillPathResolver` 无法访问；改为 public utility。
+  - 自动 import 把业务 `Order` 与 Spring `@Order` 混淆；删除误加 import。
+  - 少量测试和内部 noop sink 使用旧 FQCN，例如 `com.ai.agent.api.*`、`com.ai.agent.llm.*`、`com.ai.agent.tool.*`；统一替换到新 package。
+  - 不能并行跑多个 Maven 编译/测试命令写同一个 `target/classes`，否则可能出现 `NoSuchFileException` 这种假故障；验证阶段统一顺序执行。
+- 文档：新增 `spec/package-architecture.md`，README 增加代码导航。
+- 验证：
+  - `mvn -q -DskipTests compile`：通过。
+  - `mvn -q -DskipTests test-compile`：通过。
+  - `MYSQL_PASSWORD=*** mvn clean test`：236 tests，0 failures，0 errors，BUILD SUCCESS。
+  - `MYSQL_PASSWORD=*** DEEPSEEK_API_KEY=*** QWEN_API_KEY=*** ./scripts/real-llm-e2e.sh`：通过。
+  - 本次真实 LLM E2E 产物：`/tmp/agent-buyer-real-llm-e2e/20260502-061204`。
+- 状态：`V2-ARCH-01` 完成，package 重排只改变导航结构，不改变 HTTP/API/tool schema/DB schema 行为。
+
 ## V2 踩坑记录
 
 - Flyway 已应用的 migration 不要回改 checksum；本次 V8 已在本地 DB 应用后需要补字段，正确做法是保留 V8、追加 V8_1 幂等迁移。

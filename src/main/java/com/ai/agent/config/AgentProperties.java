@@ -1,9 +1,10 @@
 package com.ai.agent.config;
 
-import org.springframework.boot.context.properties.ConfigurationProperties;
-
+import com.ai.agent.loop.AgentLoop;
+import com.ai.agent.subagent.tool.AgentTool;
 import java.time.Duration;
 import java.util.List;
+import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "agent")
 public class AgentProperties {

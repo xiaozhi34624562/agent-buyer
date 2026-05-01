@@ -2,8 +2,8 @@ package com.ai.agent.config;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.ai.agent.skill.SkillPathResolver;
-import com.ai.agent.skill.SkillRegistry;
+import com.ai.agent.skill.path.SkillPathResolver;
+import com.ai.agent.skill.core.SkillRegistry;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

@@ -1,6 +1,6 @@
 package com.ai.agent.config;
 
-import com.ai.agent.tool.redis.RedisToolStore;
+import com.ai.agent.tool.runtime.redis.RedisToolStore;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.annotation.Qualifier;

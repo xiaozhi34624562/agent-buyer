@@ -1,7 +1,7 @@
 package com.ai.agent.config;
 
-import com.ai.agent.skill.SkillPathResolver;
-import com.ai.agent.skill.SkillRegistry;
+import com.ai.agent.skill.path.SkillPathResolver;
+import com.ai.agent.skill.core.SkillRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.DefaultResourceLoader;
 

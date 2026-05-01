@@ -1,7 +1,0 @@
-package com.ai.agent.llm;
-
-public enum ProviderErrorType {
-    RETRYABLE_PRE_STREAM,
-    NON_RETRYABLE,
-    STREAM_STARTED
-}

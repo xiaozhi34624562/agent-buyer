@@ -43,6 +43,30 @@ HTTP REST + SSE
        - async event / tool progress
 ```
 
+## 代码导航
+
+详细 package 说明见 [spec/package-architecture.md](spec/package-architecture.md)。常用入口：
+
+```text
+web.controller        HTTP/SSE 入口
+application           run 生命周期、确认、中断、修复、限流
+loop                  agent loop、LLM attempt、tool call 协调
+llm.provider          DeepSeek / Qwen provider adapter
+llm.context           provider view 组装、slash skill / ToDo transient injection
+llm.compact           large result spill、micro compact、summary compact
+tool.core             Tool 接口、schema、执行上下文
+tool.model            ToolCall / ToolTerminal / ToolStatus 等状态模型
+tool.runtime          RedisToolRuntime、执行器、waiter、closer、sweeper、pubsub
+tool.runtime.redis    LuaRedisToolStore 与 Redis key
+tool.builtin.order    query_order / cancel_order
+skill                 Skill registry、slash command、skill_list / skill_view
+subagent              SubAgent profile/runtime/AgentTool
+todo                  ToDo store/tools/reminder
+trajectory            trajectory port/store/query/dto
+business              订单与用户业务 client/model
+persistence           MyBatis entity/mapper
+```
+
 ## 当前范围
 
 已实现：
