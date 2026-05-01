@@ -61,6 +61,7 @@ public final class DeepSeekProviderAdapter implements LlmProviderAdapter {
         RuntimeException last = null;
         for (int attempt = 0; attempt <= MAX_CONNECT_RETRIES; attempt++) {
             try {
+                request.beforeProviderCall();
                 return doStream(request, listener, apiKey);
             } catch (ProviderCallException e) {
                 if (e.type() != ProviderErrorType.RETRYABLE_PRE_STREAM) {

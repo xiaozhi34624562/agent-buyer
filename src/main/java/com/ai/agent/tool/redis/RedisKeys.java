@@ -39,6 +39,10 @@ public final class RedisKeys {
         return properties.getRedisKeyPrefix() + ":active-runs";
     }
 
+    public String llmCallBudget(String runId) {
+        return base(runId) + ":llm-call-budget";
+    }
+
     private String base(String runId) {
         return properties.getRedisKeyPrefix() + ":{run:" + runId + "}";
     }

@@ -29,6 +29,7 @@ public final class AgentTurnOrchestrator {
     private final TrajectoryStore trajectoryStore;
     private final TrajectoryReader trajectoryReader;
     private final RunStateMachine stateMachine;
+    private final AgentExecutionBudget executionBudget;
 
     public AgentTurnOrchestrator(
             AgentProperties properties,
@@ -37,7 +38,8 @@ public final class AgentTurnOrchestrator {
             ToolCallCoordinator toolCallCoordinator,
             TrajectoryStore trajectoryStore,
             TrajectoryReader trajectoryReader,
-            RunStateMachine stateMachine
+            RunStateMachine stateMachine,
+            AgentExecutionBudget executionBudget
     ) {
         this.properties = properties;
         this.transcriptPairValidator = transcriptPairValidator;
@@ -46,6 +48,7 @@ public final class AgentTurnOrchestrator {
         this.trajectoryStore = trajectoryStore;
         this.trajectoryReader = trajectoryReader;
         this.stateMachine = stateMachine;
+        this.executionBudget = executionBudget;
     }
 
     public AgentRunResult runUntilStop(
@@ -59,6 +62,7 @@ public final class AgentTurnOrchestrator {
         int maxTurns = runContext.maxTurns();
         List<Tool> allowedTools = toolCallCoordinator.toolsFromContext(runContext.effectiveAllowedTools());
         String model = runContext.model();
+        AgentExecutionBudget.MainTurnBudget turnBudget = executionBudget.startMainTurn(runId);
 
         for (int i = 0; i < maxTurns; i++) {
             AgentRunResult stopped = stopIfNotRunning(runId);
@@ -93,13 +97,20 @@ public final class AgentTurnOrchestrator {
                             params,
                             messages,
                             allowedTools,
-                            sink
+                            sink,
+                            () -> executionBudget.reserveMainLlmCall(turnBudget)
                     );
                     stopped = stopIfNotRunning(runId);
                     if (stopped != null) {
                         return stopped;
                     }
                     log.info("llm attempt completed finishReason={} toolCallCount={}", result.finishReason(), result.toolCalls().size());
+                } catch (LlmCallBudgetExceededException e) {
+                    stopped = stopIfNotRunning(runId);
+                    if (stopped != null) {
+                        return stopped;
+                    }
+                    return pauseForBudgetExceeded(runId, e, sink);
                 } catch (Exception e) {
                     stopped = stopIfNotRunning(runId);
                     if (stopped != null) {
@@ -183,6 +194,35 @@ public final class AgentTurnOrchestrator {
         sink.onError(new ErrorEvent(runId, "max turns exceeded"));
         log.warn("agent run failed because max turns exceeded maxTurns={}", maxTurns);
         return terminal;
+    }
+
+    private AgentRunResult pauseForBudgetExceeded(
+            String runId,
+            LlmCallBudgetExceededException exception,
+            AgentEventSink sink
+    ) {
+        RunStateMachine.TransitionResult transition = stateMachine.pauseFromRunning(runId, exception.eventType());
+        if (!transition.changed()) {
+            log.warn("agent budget pause lost race eventType={} currentStatus={}", exception.eventType(), transition.status());
+            return new AgentRunResult(runId, transition.status(), null);
+        }
+        trajectoryStore.writeAgentEvent(runId, exception.eventType(), budgetEventJson(exception));
+        String finalText = "LLM 调用预算已达到上限，本轮已暂停。请补充说明后继续。";
+        sink.onFinal(new FinalEvent(runId, finalText, RunStatus.PAUSED, "user_input"));
+        log.warn(
+                "agent run paused because llm budget exceeded eventType={} limit={} used={}",
+                exception.eventType(),
+                exception.limit(),
+                exception.used()
+        );
+        return new AgentRunResult(runId, RunStatus.PAUSED, finalText);
+    }
+
+    private String budgetEventJson(LlmCallBudgetExceededException exception) {
+        return "{\"eventType\":\"" + exception.eventType()
+                + "\",\"limit\":" + exception.limit()
+                + ",\"used\":" + exception.used()
+                + "}";
     }
 
     private AgentRunResult stopIfNotRunning(String runId) {

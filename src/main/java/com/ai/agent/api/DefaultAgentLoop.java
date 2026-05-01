@@ -28,10 +28,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.Comparator;
+import java.util.Map;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -80,7 +82,7 @@ public final class DefaultAgentLoop implements AgentLoop {
         this.confirmTokenStore = confirmTokenStore;
     }
 
-    public DefaultAgentLoop(
+    DefaultAgentLoop(
             AgentProperties properties,
             PromptAssembler promptAssembler,
             LlmProviderAdapter providerAdapter,
@@ -122,7 +124,8 @@ public final class DefaultAgentLoop implements AgentLoop {
                         ),
                         trajectoryStore,
                         trajectoryReader,
-                        new RunStateMachine(trajectoryStore)
+                        new RunStateMachine(trajectoryStore),
+                        new AgentExecutionBudget(properties, new LocalRunLlmCallBudgetStore())
                 ),
                 new ConfirmationIntentService(),
                 confirmTokenStore
@@ -354,5 +357,23 @@ public final class DefaultAgentLoop implements AgentLoop {
         RunStatus current = result.status();
         log.warn("agent terminal transition lost race targetStatus={} currentStatus={}", status, current);
         return new AgentRunResult(runId, current, null);
+    }
+
+    private static final class LocalRunLlmCallBudgetStore implements RunLlmCallBudgetStore {
+        private final Map<String, Long> countsByRun = new ConcurrentHashMap<>();
+
+        @Override
+        public Reservation reserveRunCall(String runId, int limit) {
+            AtomicBoolean accepted = new AtomicBoolean(false);
+            long next = countsByRun.compute(runId, (ignored, current) -> {
+                long used = current == null ? 0L : current;
+                if (used >= limit) {
+                    return used;
+                }
+                accepted.set(true);
+                return used + 1L;
+            });
+            return new Reservation(accepted.get(), next);
+        }
     }
 }

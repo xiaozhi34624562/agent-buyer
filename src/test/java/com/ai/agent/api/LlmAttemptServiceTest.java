@@ -198,6 +198,40 @@ class LlmAttemptServiceTest {
                 .containsExactly("deepseek", "qwen");
     }
 
+    @Test
+    void fallbackBudgetRejectionDoesNotWriteFallbackEventOrAttempt() {
+        FailingProvider primary = new FailingProvider(
+                "deepseek",
+                new ProviderCallException(ProviderErrorType.RETRYABLE_PRE_STREAM, "DeepSeek retryable status 500", 500)
+        );
+        CapturingProvider fallback = new CapturingProvider("qwen");
+        RecordingTrajectoryStore trajectoryStore = new RecordingTrajectoryStore();
+        LlmAttemptService service = new LlmAttemptService(
+                new LlmProviderAdapterRegistry(List.of(primary, fallback)),
+                trajectoryStore,
+                new ObjectMapper()
+        );
+
+        assertThatThrownBy(() -> service.executeAttempt(
+                "run-1",
+                1,
+                "att-1",
+                runContext("deepseek", "qwen", "{}"),
+                "deepseek-chat",
+                null,
+                List.of(LlmMessage.user("msg-1", "hello")),
+                List.of(),
+                new NoopAgentEventSink(),
+                new FallbackRejectingObserver()
+        )).isInstanceOf(LlmCallBudgetExceededException.class);
+
+        assertThat(primary.requests).hasSize(1);
+        assertThat(fallback.requests).isEmpty();
+        assertThat(trajectoryStore.attempts).extracting(AttemptRecord::provider)
+                .containsExactly("deepseek");
+        assertThat(trajectoryStore.events).isEmpty();
+    }
+
     private static RunContext runContext(String primaryProvider, String fallbackProvider, String providerOptions) {
         return new RunContext(
                 "run-1",
@@ -232,6 +266,7 @@ class LlmAttemptServiceTest {
 
         @Override
         public LlmStreamResult streamChat(LlmChatRequest request, LlmStreamListener listener) {
+            request.beforeProviderCall();
             requests.add(request);
             return new LlmStreamResult("ok", List.of(), FinishReason.STOP, null, null);
         }
@@ -259,8 +294,21 @@ class LlmAttemptServiceTest {
 
         @Override
         public LlmStreamResult streamChat(LlmChatRequest request, LlmStreamListener listener) {
+            request.beforeProviderCall();
             requests.add(request);
             throw failure;
+        }
+    }
+
+    private static final class FallbackRejectingObserver implements com.ai.agent.llm.LlmCallObserver {
+        private int calls;
+
+        @Override
+        public void beforeProviderCall() {
+            calls++;
+            if (calls > 1) {
+                throw new LlmCallBudgetExceededException("RUN_WIDE_BUDGET", 1, 1);
+            }
         }
     }
 

@@ -3,6 +3,7 @@ package com.ai.agent.api;
 import com.ai.agent.domain.FinishReason;
 import com.ai.agent.llm.LlmChatRequest;
 import com.ai.agent.llm.LlmMessage;
+import com.ai.agent.llm.LlmCallObserver;
 import com.ai.agent.llm.LlmProviderAdapter;
 import com.ai.agent.llm.LlmProviderAdapterRegistry;
 import com.ai.agent.llm.LlmStreamResult;
@@ -49,7 +50,7 @@ public final class LlmAttemptService {
             List<Tool> allowedTools,
             AgentEventSink sink
     ) throws Exception {
-        return executeSingleAttempt(runId, turnNo, attemptId, providerName, model, params, messages, allowedTools, sink);
+        return executeSingleAttempt(runId, turnNo, attemptId, providerName, model, params, messages, allowedTools, sink, LlmCallObserver.NOOP);
     }
 
     public LlmStreamResult executeAttempt(
@@ -63,6 +64,21 @@ public final class LlmAttemptService {
             List<Tool> allowedTools,
             AgentEventSink sink
     ) throws Exception {
+        return executeAttempt(runId, turnNo, attemptId, runContext, model, params, messages, allowedTools, sink, LlmCallObserver.NOOP);
+    }
+
+    public LlmStreamResult executeAttempt(
+            String runId,
+            int turnNo,
+            String attemptId,
+            RunContext runContext,
+            String model,
+            LlmParams params,
+            List<LlmMessage> messages,
+            List<Tool> allowedTools,
+            AgentEventSink sink,
+            LlmCallObserver callObserver
+    ) throws Exception {
         try {
             return executeSingleAttempt(
                     runId,
@@ -73,29 +89,50 @@ public final class LlmAttemptService {
                     params,
                     messages,
                     allowedTools,
-                    sink
+                    sink,
+                    callObserver
             );
         } catch (Exception primaryFailure) {
             String fallbackProvider = fallbackPolicy.selectFallbackProvider(runContext, primaryFailure)
                     .orElseThrow(() -> primaryFailure);
             String fallbackAttemptId = Ids.newId("att");
-            trajectoryStore.writeAgentEvent(
-                    runId,
-                    "llm_fallback",
-                    fallbackEventJson(attemptId, fallbackAttemptId, runContext.primaryProvider(), fallbackProvider, primaryFailure)
-            );
-            return executeSingleAttempt(
-                    runId,
-                    turnNo,
-                    fallbackAttemptId,
-                    fallbackProvider,
-                    null,
-                    params,
-                    messages,
-                    allowedTools,
-                    sink
-            );
+            try {
+                LlmStreamResult fallbackResult = executeSingleAttempt(
+                        runId,
+                        turnNo,
+                        fallbackAttemptId,
+                        fallbackProvider,
+                        null,
+                        params,
+                        messages,
+                        allowedTools,
+                        sink,
+                        callObserver
+                );
+                writeFallbackEvent(runId, attemptId, fallbackAttemptId, runContext.primaryProvider(), fallbackProvider, primaryFailure);
+                return fallbackResult;
+            } catch (LlmCallBudgetExceededException budgetExceeded) {
+                throw budgetExceeded;
+            } catch (Exception fallbackFailure) {
+                writeFallbackEvent(runId, attemptId, fallbackAttemptId, runContext.primaryProvider(), fallbackProvider, primaryFailure);
+                throw fallbackFailure;
+            }
         }
+    }
+
+    private void writeFallbackEvent(
+            String runId,
+            String primaryAttemptId,
+            String fallbackAttemptId,
+            String primaryProvider,
+            String fallbackProvider,
+            Exception primaryFailure
+    ) {
+        trajectoryStore.writeAgentEvent(
+                runId,
+                "llm_fallback",
+                fallbackEventJson(primaryAttemptId, fallbackAttemptId, primaryProvider, fallbackProvider, primaryFailure)
+        );
     }
 
     private LlmStreamResult executeSingleAttempt(
@@ -107,7 +144,8 @@ public final class LlmAttemptService {
             LlmParams params,
             List<LlmMessage> messages,
             List<Tool> allowedTools,
-            AgentEventSink sink
+            AgentEventSink sink,
+            LlmCallObserver callObserver
     ) throws Exception {
         LlmProviderAdapter providerAdapter = providerRegistry.resolve(providerName);
         String actualProviderName = providerAdapter.providerName();
@@ -121,12 +159,15 @@ public final class LlmAttemptService {
                             params == null ? null : params.temperature(),
                             params == null ? null : params.maxTokens(),
                             messages,
-                            allowedTools.stream().map(Tool::schema).toList()
+                            allowedTools.stream().map(Tool::schema).toList(),
+                            callObserver
                     ),
                     delta -> sink.onTextDelta(new TextDeltaEvent(runId, attemptId, delta))
             );
             writeSucceededAttempt(runId, turnNo, attemptId, actualProviderName, actualModel, result);
             return result;
+        } catch (LlmCallBudgetExceededException e) {
+            throw e;
         } catch (Exception e) {
             writeFailedAttempt(runId, turnNo, attemptId, actualProviderName, actualModel, e);
             throw e;

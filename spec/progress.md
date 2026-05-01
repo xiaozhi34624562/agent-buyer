@@ -395,11 +395,28 @@ V2 必须按 `V2.0 -> V2.1 -> V2.2` 顺序推进，里程碑内部按 `task.md` 
 - 最终 full：`MYSQL_PASSWORD=*** mvn test`，92 tests，0 failures，0 errors，`BUILD SUCCESS`。
 - `java-alibaba-review` gate：未发现阻断 issue；确认 `WAITING_USER_CONFIRMATION / PAUSED` continuation 的原状态恢复路径由 CAS 保护，不覆盖终态。
 
-### V20-05 PENDING
+### V20-05 IN_PROGRESS
 
 - 写入范围：`AgentExecutionBudget`、`AgentTurnOrchestrator` 嵌入预算检查、`agent_event` 新事件类型 `MAIN_TURN_BUDGET` / `RUN_WIDE_BUDGET`。
 - 前置：`V20-04`、`V20-04a`。
 - 关注点：单 user turn 30 次 + run-wide 80 次双层预算；触发后必须 `RUNNING -> PAUSED`，不允许覆盖已终态 run。
+
+启动记录：
+
+- 启动时间：2026-05-01 22:59 CST。
+- 工程判断：预算检查必须卡在真实 provider HTTP 调用前，而不是只在 `AgentTurnOrchestrator` 外层循环加一；否则 fallback 和 provider 内部 retry 不会计入预算。
+- TDD 目标：per-turn 超限、run-wide 超限、超限后 run -> `PAUSED` + `agent_event`，并确保 budget denied 不写伪造 LLM attempt。
+
+集成记录：
+
+- 新增 `AgentExecutionBudget`、`RunLlmCallBudgetStore`、`RedisRunLlmCallBudgetStore` 和 `LlmCallObserver`，provider 每次真实 HTTP call 前 reserve budget；provider 内部 retry 与 fallback 都会计入。
+- `AgentTurnOrchestrator` 在 budget exceeded 时执行 `RUNNING -> PAUSED`，写 `MAIN_TURN_BUDGET` / `RUN_WIDE_BUDGET` event，并通过 SSE final 返回 `nextActionRequired=user_input`。
+- review gate 发现测试辅助构造器曾绕过 run-wide budget；已改为 package-private helper 并使用本地预算 store，避免无条件放行。
+- review gate 发现 fallback event 可能在 fallback budget 拒绝前写入；已延后 `llm_fallback` event 到 fallback 成功或真实 provider 失败之后，budget 拒绝不写 orphan event/attempt。
+- review gate 发现 Redis budget key 缺少生命周期；已在 Lua 成功与拒绝路径都刷新 7 天 TTL，并补 TTL 集成断言。
+- targeted：`MYSQL_PASSWORD=*** mvn -Dtest=com.ai.agent.RedisToolStoreIntegrationTest,com.ai.agent.api.AgentExecutionBudgetTest,com.ai.agent.api.AgentTurnOrchestratorBudgetTest,com.ai.agent.api.LlmAttemptServiceTest,com.ai.agent.llm.QwenProviderAdapterTest test`，24 tests，0 failures，`BUILD SUCCESS`。
+- full：`MYSQL_PASSWORD=*** mvn test`，120 tests，0 failures，0 errors，`BUILD SUCCESS`。
+- `java-alibaba-review` 复审：未发现阻断 issue；确认 Redis budget key TTL、fallback budget rejection 无 orphan event、helper 构造器不再绕过预算。
 
 ### V20-06 PENDING
 

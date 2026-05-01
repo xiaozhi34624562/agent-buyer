@@ -109,8 +109,9 @@ class QwenProviderAdapterTest {
                 new QwenCompatibilityProfile(objectMapper),
                 objectMapper
         );
+        AtomicInteger observedProviderCalls = new AtomicInteger();
 
-        assertThatThrownBy(() -> adapter.streamChat(request(), ignored -> {
+        assertThatThrownBy(() -> adapter.streamChat(requestWithObserver(observedProviderCalls::incrementAndGet), ignored -> {
         }))
                 .isInstanceOfSatisfying(ProviderCallException.class,
                         e -> {
@@ -120,6 +121,7 @@ class QwenProviderAdapterTest {
                 .hasMessageContaining("Qwen retryable status 500")
                 .hasMessageNotContaining("secret prompt fragment");
         assertThat(requestCount).hasValue(3);
+        assertThat(observedProviderCalls).hasValue(3);
     }
 
     @Test
@@ -245,6 +247,19 @@ class QwenProviderAdapterTest {
                         1024,
                         List.of()
                 ))
+        );
+    }
+
+    private LlmChatRequest requestWithObserver(LlmCallObserver observer) {
+        return new LlmChatRequest(
+                "run-1",
+                "attempt-1",
+                "qwen-plus",
+                0.2,
+                256,
+                List.of(LlmMessage.system("msg-1", "You are helpful")),
+                List.of(),
+                observer
         );
     }
 

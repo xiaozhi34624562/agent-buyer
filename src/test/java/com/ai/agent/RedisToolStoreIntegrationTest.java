@@ -1,5 +1,6 @@
 package com.ai.agent;
 
+import com.ai.agent.api.RunLlmCallBudgetStore;
 import com.ai.agent.tool.StartedTool;
 import com.ai.agent.tool.CancelReason;
 import com.ai.agent.tool.ToolCall;
@@ -23,10 +24,30 @@ class RedisToolStoreIntegrationTest {
     RedisToolStore store;
 
     @Autowired
+    RunLlmCallBudgetStore budgetStore;
+
+    @Autowired
     RedisKeys keys;
 
     @Autowired
     StringRedisTemplate redisTemplate;
+
+    @Test
+    void llmCallBudgetReserveIsAtomicAndStopsAtLimit() {
+        String runId = Ids.newId("test_run");
+        try {
+            assertThat(budgetStore.reserveRunCall(runId, 2))
+                    .isEqualTo(new RunLlmCallBudgetStore.Reservation(true, 1));
+            assertThat(budgetStore.reserveRunCall(runId, 2))
+                    .isEqualTo(new RunLlmCallBudgetStore.Reservation(true, 2));
+            assertThat(budgetStore.reserveRunCall(runId, 2))
+                    .isEqualTo(new RunLlmCallBudgetStore.Reservation(false, 2));
+            assertThat(redisTemplate.getExpire(keys.llmCallBudget(runId)))
+                    .isPositive();
+        } finally {
+            redisTemplate.delete(keys.llmCallBudget(runId));
+        }
+    }
 
     @Test
     void safeCallsStartTogetherButDoNotCrossUnsafeBarrier() {
@@ -266,7 +287,8 @@ class RedisToolStoreIntegrationTest {
                 keys.queue(runId),
                 keys.tools(runId),
                 keys.toolUseIds(runId),
-                keys.leases(runId)
+                keys.leases(runId),
+                keys.llmCallBudget(runId)
         ));
         redisTemplate.opsForSet().remove(keys.activeRuns(), runId);
     }

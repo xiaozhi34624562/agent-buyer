@@ -121,6 +121,9 @@ public class AgentProperties {
         private long toolResultTimeoutMs = 90_000;
         private long runWallclockTimeoutMs = 300_000;
         private int hardTokenCap = 30_000;
+        private int llmCallBudgetPerUserTurn = 30;
+        private int subAgentLlmCallBudgetPerUserTurn = 30;
+        private int runWideLlmCallBudget = 80;
 
         public int getMaxTurns() {
             return maxTurns;
@@ -152,6 +155,30 @@ public class AgentProperties {
 
         public void setHardTokenCap(int hardTokenCap) {
             this.hardTokenCap = hardTokenCap;
+        }
+
+        public int getLlmCallBudgetPerUserTurn() {
+            return llmCallBudgetPerUserTurn;
+        }
+
+        public void setLlmCallBudgetPerUserTurn(int llmCallBudgetPerUserTurn) {
+            this.llmCallBudgetPerUserTurn = llmCallBudgetPerUserTurn;
+        }
+
+        public int getSubAgentLlmCallBudgetPerUserTurn() {
+            return subAgentLlmCallBudgetPerUserTurn;
+        }
+
+        public void setSubAgentLlmCallBudgetPerUserTurn(int subAgentLlmCallBudgetPerUserTurn) {
+            this.subAgentLlmCallBudgetPerUserTurn = subAgentLlmCallBudgetPerUserTurn;
+        }
+
+        public int getRunWideLlmCallBudget() {
+            return runWideLlmCallBudget;
+        }
+
+        public void setRunWideLlmCallBudget(int runWideLlmCallBudget) {
+            this.runWideLlmCallBudget = runWideLlmCallBudget;
         }
     }
 
