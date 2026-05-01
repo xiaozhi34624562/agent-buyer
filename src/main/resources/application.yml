@@ -66,3 +66,4 @@ agent:
     large-result-threshold-tokens: 2000
     large-result-head-tokens: 200
     large-result-tail-tokens: 200
+    micro-compact-threshold-tokens: 50000

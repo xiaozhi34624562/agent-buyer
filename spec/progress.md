@@ -466,11 +466,29 @@ V2 必须按 `V2.0 -> V2.1 -> V2.2` 顺序推进，里程碑内部按 `task.md` 
 - 踩坑记录：review/subagent 如果没有带 `MYSQL_PASSWORD`，Spring 集成测试会以 root 空密码连接 MySQL 并失败；本项目全量回归统一使用 `MYSQL_PASSWORD=*** mvn test`。
 - `java-alibaba-review` 复审：未发现 P0/P1/P2 阻断 issue。
 
-### V20-08 PENDING
+### V20-08 DONE
 
 - 写入范围：`MicroCompactor`、token estimator、`ContextViewBuilder` 接入。
 - 前置：`V20-07`。
 - 关注点：旧 tool result 替换为 `<oldToolResult>` 占位但保留 message id，pair validator 不能爆。
+
+启动记录：
+
+- 启动时间：2026-05-01 23:28 CST。
+- 工程判断：micro compact 作为 large spill 后的第二道 provider view 压缩，只处理旧 `TOOL` message 的 content，不删除 message，不改变 `toolUseId`，并保留最近消息窗口避免压缩当前 turn 的工具结果。
+- TDD 目标：总 token 达到 50000（测试用小阈值）后，旧 tool result 替换为 `<oldToolResult>Tool result is deleted due to long context</oldToolResult>`；尾部近期 tool result 不替换；压缩后 `TranscriptPairValidator` 通过。
+
+实现记录：
+
+- 实现时间：2026-05-01 23:30 CST。
+- 新增 `MicroCompactor`，从 `AgentProperties.context.micro-compact-threshold-tokens` 读取阈值，默认 `50000`；provider view 总 token 达到阈值时，仅将最后 3 条 message 之前的 `TOOL` content 替换为 `<oldToolResult>Tool result is deleted due to long context</oldToolResult>`。
+- `ContextViewBuilder` 接入顺序为 raw `TranscriptPairValidator` -> `LargeResultSpiller` -> `MicroCompactor` -> final `TranscriptPairValidator`；压缩只作用 provider view，不修改 MySQL raw trajectory message。
+- TDD 红灯：`mvn -Dtest=com.ai.agent.llm.MicroCompactorTest,com.ai.agent.llm.ContextViewBuilderTest test` 因缺失 `MicroCompactor` 与 `microCompactThresholdTokens` 配置编译失败。
+- targeted 绿灯：`mvn -Dtest=com.ai.agent.llm.MicroCompactorTest,com.ai.agent.llm.ContextViewBuilderTest,com.ai.agent.api.AgentTurnOrchestratorBudgetTest test`，9 tests，0 failures，`BUILD SUCCESS`。
+- 全量验证：`MYSQL_PASSWORD=*** mvn test`，130 tests，0 failures，`BUILD SUCCESS`。
+- `java-alibaba-review`：未发现 P0/P1/P2 阻断 issue；确认只替换旧 `TOOL` content、保留最近 3 条 message、最终 provider view 通过配对校验。
+- 主 agent 复跑 full：`MYSQL_PASSWORD=*** mvn test`，130 tests，0 failures，0 errors，`BUILD SUCCESS`。
+- 状态：DONE。
 
 ### V20-09 PENDING
 

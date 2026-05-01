@@ -468,6 +468,7 @@ public class AgentProperties {
         private int largeResultThresholdTokens = 2_000;
         private int largeResultHeadTokens = 200;
         private int largeResultTailTokens = 200;
+        private int microCompactThresholdTokens = 50_000;
 
         public int getLargeResultThresholdTokens() {
             return largeResultThresholdTokens;
@@ -491,6 +492,14 @@ public class AgentProperties {
 
         public void setLargeResultTailTokens(int largeResultTailTokens) {
             this.largeResultTailTokens = largeResultTailTokens;
+        }
+
+        public int getMicroCompactThresholdTokens() {
+            return microCompactThresholdTokens;
+        }
+
+        public void setMicroCompactThresholdTokens(int microCompactThresholdTokens) {
+            this.microCompactThresholdTokens = microCompactThresholdTokens;
         }
     }
 

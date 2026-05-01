@@ -18,7 +18,12 @@ class ContextViewBuilderTest {
         reader.messages.add(LlmMessage.user("u1", "cancel order"));
         reader.messages.add(LlmMessage.assistant("a1", null, List.of(new ToolCallMessage("call_1", "query_order", "{}"))));
         reader.messages.add(LlmMessage.tool("t1", "call_1", "{\"ok\":true}"));
-        ContextViewBuilder builder = new ContextViewBuilder(reader, new TranscriptPairValidator(), noOpSpiller());
+        ContextViewBuilder builder = new ContextViewBuilder(
+                reader,
+                new TranscriptPairValidator(),
+                noOpSpiller(),
+                noOpMicroCompactor()
+        );
 
         ProviderContextView view = builder.build("run-1");
 
@@ -32,7 +37,12 @@ class ContextViewBuilderTest {
     void rejectsInvalidRawTrajectoryBeforeProviderRequest() {
         FakeTrajectoryReader reader = new FakeTrajectoryReader();
         reader.messages.add(LlmMessage.tool("t1", "missing", "{}"));
-        ContextViewBuilder builder = new ContextViewBuilder(reader, new TranscriptPairValidator(), noOpSpiller());
+        ContextViewBuilder builder = new ContextViewBuilder(
+                reader,
+                new TranscriptPairValidator(),
+                noOpSpiller(),
+                noOpMicroCompactor()
+        );
 
         assertThatThrownBy(() -> builder.build("run-1"))
                 .isInstanceOf(IllegalStateException.class)
@@ -52,7 +62,8 @@ class ContextViewBuilderTest {
         ContextViewBuilder builder = new ContextViewBuilder(
                 reader,
                 new TranscriptPairValidator(),
-                new LargeResultSpiller(properties, new TokenEstimator())
+                new LargeResultSpiller(properties, new TokenEstimator()),
+                noOpMicroCompactor()
         );
 
         ProviderContextView view = builder.build("run-1");
@@ -64,10 +75,45 @@ class ContextViewBuilderTest {
         assertThat(reader.messages.get(1).content()).isEqualTo(tokenText(18));
     }
 
+    @Test
+    void microCompactsAfterSpillingWithoutMutatingRawTrajectory() {
+        FakeTrajectoryReader reader = new FakeTrajectoryReader();
+        reader.messages.add(LlmMessage.assistant("a-old", null, List.of(new ToolCallMessage("call_old", "query_order", "{}"))));
+        LlmMessage rawOldTool = LlmMessage.tool("t-old", "call_old", tokenText(18));
+        reader.messages.add(rawOldTool);
+        reader.messages.add(LlmMessage.user("u1", tokenText(18)));
+        reader.messages.add(LlmMessage.user("u2", tokenText(18)));
+        reader.messages.add(LlmMessage.user("u3", tokenText(18)));
+        AgentProperties properties = new AgentProperties();
+        properties.getContext().setLargeResultThresholdTokens(12);
+        properties.getContext().setLargeResultHeadTokens(3);
+        properties.getContext().setLargeResultTailTokens(2);
+        properties.getContext().setMicroCompactThresholdTokens(12);
+        ContextViewBuilder builder = new ContextViewBuilder(
+                reader,
+                new TranscriptPairValidator(),
+                new LargeResultSpiller(properties, new TokenEstimator()),
+                new MicroCompactor(properties, new TokenEstimator())
+        );
+
+        ProviderContextView view = builder.build("run-1");
+
+        new TranscriptPairValidator().validate(view.messages());
+        assertThat(view.messages().get(1).content()).isEqualTo(MicroCompactor.OLD_TOOL_RESULT_PLACEHOLDER);
+        assertThat(rawOldTool.content()).isEqualTo(tokenText(18));
+        assertThat(reader.messages.get(1).content()).isEqualTo(tokenText(18));
+    }
+
     private static LargeResultSpiller noOpSpiller() {
         AgentProperties properties = new AgentProperties();
         properties.getContext().setLargeResultThresholdTokens(Integer.MAX_VALUE);
         return new LargeResultSpiller(properties, new TokenEstimator());
+    }
+
+    private static MicroCompactor noOpMicroCompactor() {
+        AgentProperties properties = new AgentProperties();
+        properties.getContext().setMicroCompactThresholdTokens(Integer.MAX_VALUE);
+        return new MicroCompactor(properties, new TokenEstimator());
     }
 
     private static String tokenText(int tokenCount) {
