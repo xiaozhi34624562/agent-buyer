@@ -1,20 +1,20 @@
-# Agent Buyer Console Implementation Plan
+# Agent Buyer Console 实现计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **给 agentic worker 的要求：** 实现本计划时必须使用 `superpowers:subagent-driven-development`，推荐按任务派发 sub agent；也可以使用 `superpowers:executing-plans` 在当前会话逐项执行。所有步骤使用 checkbox 语法跟踪。
 
-**Goal:** Build a local Agent Buyer Console that demonstrates and debugs the agent-buyer harness through chat, run timeline, SSE event stream, and current Redis runtime state.
+**目标：** 构建一个本地可演示、可调试的 Agent Buyer Console，用来观察 `agent-buyer` 的对话、SSE 流、run 轨迹、工具调用、human-in-the-loop 状态和当前 Redis runtime state。
 
-**Architecture:** V1 is an agent console, not a generic database browser. The frontend calls existing `/api/agent/*` endpoints for chat/SSE/trajectory and adds only two backend admin capabilities: paged run list and sanitized current-run runtime state. MySQL raw tables and arbitrary Redis key browsing are deferred to a later admin-inspector version.
+**架构：** V1 是 agent console，不是通用数据库管理后台。前端复用现有 `/api/agent/*` 接口完成 chat、SSE、trajectory 查询，只新增两个最小 admin 能力：分页 run list 和经过脱敏、限定范围的当前 run runtime-state。原始 MySQL 表浏览、任意 Redis key 浏览推迟到独立 admin-inspector 版本，不进入本阶段。
 
-**Tech Stack:** Spring Boot 3.3 + MyBatis Plus + Redis for backend additions; React 18 + TypeScript + Vite + Tailwind CSS + lucide-react + Vitest/React Testing Library for frontend.
+**技术栈：** 后端使用 Spring Boot 3.3、MyBatis Plus、Redis；前端使用 React 18、TypeScript、Vite、Tailwind CSS、lucide-react、Vitest、React Testing Library。
 
 ---
 
-## 0. Scope Reset
+## 0. 范围重新定义
 
-### V1 Product Shape
+### 0.1 V1 产品形态
 
-The first frontend should help a reviewer understand the agent lifecycle:
+第一版前端要帮助 reviewer 快速理解 agent 生命周期，而不是替代 IDEA Database、RedisInsight 或运维后台。
 
 ```text
 Run List         Run Timeline                         Chat / Controls
@@ -22,25 +22,25 @@ Run List         Run Timeline                         Chat / Controls
 状态筛选          compactions / child links              abort / interrupt / continue
 ```
 
-The console should answer these questions quickly:
+这个 console 要能快速回答这些问题：
 
-- 这个 run 是谁发起的，当前处于什么状态？
-- 模型说了什么，什么时候调用了哪些 tool？
+- 这个 run 是谁发起的，现在是什么状态？
+- 模型输出了什么，什么时候调用了哪些 tool？
 - tool 参数、进度、结果、synthetic result、compact、fallback 有没有发生？
-- 当前 run 在 Redis 里还有哪些 active state？
+- 当前 run 在 Redis 中还有哪些活跃 runtime state？
 - human-in-the-loop 确认、缺槽追问、interrupt、SubAgent、ToDo 是否按预期工作？
 
-### V1 Non-Goals
+### 0.2 V1 不做什么
 
-- Do not build a generic MySQL table browser.
-- Do not expose arbitrary Redis key lookup.
-- Do not duplicate `/api/agent/runs` chat proxy as `/api/admin/chat`.
-- Do not expose `confirmToken`, provider raw diagnostic payload, API keys, or full unredacted tool result JSON.
-- Do not add Spring Security unless a later security-focused phase is created.
+- 不做通用 MySQL table browser。
+- 不暴露任意 Redis key lookup。
+- 不把 `/api/agent/runs` 再包装成 `/api/admin/chat`。
+- 不暴露 `confirmToken`、provider 原始诊断 payload、API key、未脱敏完整 tool result JSON。
+- 不引入 Spring Security。本阶段是本地 demo console，认证只做最小 `X-Admin-Token` guard。
 
-### V1 Backend Contract
+### 0.3 V1 后端接口契约
 
-Use existing endpoints for chat and trajectory:
+Chat、SSE、trajectory 直接使用现有接口：
 
 ```text
 POST /api/agent/runs
@@ -50,20 +50,20 @@ POST /api/agent/runs/{runId}/abort
 POST /api/agent/runs/{runId}/interrupt
 ```
 
-Add minimal admin endpoints:
+只新增两个 admin 接口：
 
 ```text
 GET /api/admin/console/runs
 GET /api/admin/console/runs/{runId}/runtime-state
 ```
 
-Admin endpoints are local/demo-only in V1 and guarded by `X-Admin-Token` when `agent.admin.token` is configured.
+当配置了 `agent.admin.token` 时，admin 接口必须校验 `X-Admin-Token`。
 
 ---
 
-## 1. File Structure
+## 1. 文件结构
 
-### Backend Additions
+### 1.1 后端新增文件
 
 ```text
 src/main/java/com/ai/agent/config/AgentProperties.java
@@ -91,9 +91,9 @@ src/test/java/com/ai/agent/web/admin/
     AdminRuntimeStateServiceTest.java
 ```
 
-### Frontend Additions
+### 1.2 前端新增文件
 
-The frontend lives inside the existing Git repo, not as a sibling directory:
+前端放在当前仓库内部，不新建兄弟仓库：
 
 ```text
 admin-web/
@@ -153,38 +153,65 @@ admin-web/
       agent.ts
       admin.ts
       sse.ts
+    test/
+      fixtures/
+        trajectory.ts
+        sseEvents.ts
 ```
 
 ---
 
-## 2. Milestones
+## 2. 里程碑
 
-| Milestone | Outcome | Gate |
+| 里程碑 | 交付结果 | Gate |
 |---|---|---|
-| M1 Backend Console API | Run list and runtime-state endpoints work with tests | `mvn test` |
-| M2 Frontend Shell | Three-panel console renders with mock data and responsive constraints | `npm test`, `npm run build` |
-| M3 Data Integration | Run list, timeline, runtime-state use real backend data | backend + frontend tests |
-| M4 Chat + SSE | Create/continue run through existing `/api/agent/*`; HITL, abort, interrupt work | manual local smoke + tests |
-| M5 Hardening | README, scripts, Playwright smoke, final verification | `mvn test`, `npm run build`, local browser smoke |
+| M1 Backend Console API | run list 和 runtime-state 接口可用并有测试 | `mvn test` |
+| M2 Frontend Shell | 三栏 console 用 mock data 可渲染，响应式约束正确 | `npm test`、`npm run build` |
+| M3 Real Data Integration | run list、timeline、runtime-state 接入真实后端数据 | 后端和前端测试通过 |
+| M4 Chat + SSE | 通过现有 `/api/agent/*` 创建和继续 run，HITL、abort、interrupt 可用 | 本地 smoke 和测试通过 |
+| M5 Hardening | README、启动脚本、浏览器 smoke、最终验证完成 | `mvn test`、`npm run build`、本地浏览器 smoke |
 
-Do not start M2 before M1 is merged. Do not start M4 before M3 can show a real run trajectory.
+执行顺序要求：
+
+- M1 没完成前不能开始 M2。
+- M3 不能展示真实 trajectory 前不能开始 M4。
+- 每个里程碑完成后做一次 review，再进入下一个里程碑。
 
 ---
 
-## 3. M1 Backend Console API
+## 3. M1 后端 Console API
 
-### Task 1: Add Admin Properties and Access Guard
+### Task 1：增加 Admin 配置和访问控制
 
-**Files:**
+**文件：**
 
-- Modify: `src/main/java/com/ai/agent/config/AgentProperties.java`
-- Modify: `src/main/resources/application.yml`
-- Create: `src/main/java/com/ai/agent/web/admin/service/AdminAccessGuard.java`
-- Test: `src/test/java/com/ai/agent/web/admin/service/AdminAccessGuardTest.java`
+- 修改：`src/main/java/com/ai/agent/config/AgentProperties.java`
+- 修改：`src/main/resources/application.yml`
+- 新建：`src/main/java/com/ai/agent/web/admin/service/AdminAccessGuard.java`
+- 测试：`src/test/java/com/ai/agent/web/admin/service/AdminAccessGuardTest.java`
 
-- [ ] **Step 1: Add admin config**
+- [ ] **Step 1：写失败测试**
 
-Add an `Admin` nested property to `AgentProperties`:
+`AdminAccessGuardTest` 覆盖以下行为：
+
+```text
+enabled=true, token blank       -> allowed
+enabled=true, token matches     -> allowed
+enabled=true, token mismatch    -> throws AdminAccessDeniedException
+enabled=false                   -> throws AdminDisabledException
+```
+
+运行：
+
+```bash
+mvn -q -Dtest=com.ai.agent.web.admin.service.AdminAccessGuardTest test
+```
+
+预期：编译失败，因为 `AdminAccessGuard` 尚不存在。
+
+- [ ] **Step 2：增加配置项**
+
+在 `AgentProperties` 中增加嵌套配置：
 
 ```java
 private Admin admin = new Admin();
@@ -219,7 +246,7 @@ public static class Admin {
 }
 ```
 
-Add defaults to `application.yml`:
+在 `application.yml` 中增加默认值：
 
 ```yaml
 agent:
@@ -228,28 +255,9 @@ agent:
     token: ${AGENT_ADMIN_TOKEN:}
 ```
 
-- [ ] **Step 2: Add guard tests**
+- [ ] **Step 3：实现 guard**
 
-Create tests for these cases:
-
-```text
-enabled=true, token blank       -> allowed
-enabled=true, token matches     -> allowed
-enabled=true, token mismatch    -> throws AdminAccessDeniedException
-enabled=false                   -> throws AdminDisabledException
-```
-
-Run:
-
-```bash
-mvn -q -Dtest=com.ai.agent.web.admin.service.AdminAccessGuardTest test
-```
-
-Expected before implementation: compile failure because `AdminAccessGuard` does not exist.
-
-- [ ] **Step 3: Implement guard**
-
-`AdminAccessGuard` must be a small service:
+`AdminAccessGuard` 是一个小型 service，只做本地 demo console 的开关和 token 校验：
 
 ```java
 @Service
@@ -282,18 +290,18 @@ public final class AdminAccessGuard {
 }
 ```
 
-- [ ] **Step 4: Verify**
+- [ ] **Step 4：验证**
 
-Run:
+运行：
 
 ```bash
 mvn -q -Dtest=com.ai.agent.web.admin.service.AdminAccessGuardTest test
 mvn -q -DskipTests compile
 ```
 
-Expected: pass.
+预期：全部通过。
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5：提交**
 
 ```bash
 git add src/main/java/com/ai/agent/config/AgentProperties.java \
@@ -303,19 +311,19 @@ git add src/main/java/com/ai/agent/config/AgentProperties.java \
 git commit -m "feat(console): add admin access guard"
 ```
 
-### Task 2: Add Run List Query Service
+### Task 2：增加 Run List 查询服务
 
-**Files:**
+**文件：**
 
-- Create: `src/main/java/com/ai/agent/web/admin/dto/AdminPageResponse.java`
-- Create: `src/main/java/com/ai/agent/web/admin/dto/AdminRunSummaryDto.java`
-- Create: `src/main/java/com/ai/agent/web/admin/dto/AdminRunListResponse.java`
-- Create: `src/main/java/com/ai/agent/web/admin/service/AdminRunListService.java`
-- Test: `src/test/java/com/ai/agent/web/admin/service/AdminRunListServiceTest.java`
+- 新建：`src/main/java/com/ai/agent/web/admin/dto/AdminPageResponse.java`
+- 新建：`src/main/java/com/ai/agent/web/admin/dto/AdminRunSummaryDto.java`
+- 新建：`src/main/java/com/ai/agent/web/admin/dto/AdminRunListResponse.java`
+- 新建：`src/main/java/com/ai/agent/web/admin/service/AdminRunListService.java`
+- 测试：`src/test/java/com/ai/agent/web/admin/service/AdminRunListServiceTest.java`
 
-- [ ] **Step 1: Define DTOs**
+- [ ] **Step 1：定义 DTO**
 
-Use `LocalDateTime` to match existing persistence entities.
+使用 `LocalDateTime`，和当前持久化实体保持一致。
 
 ```java
 public record AdminPageResponse<T>(
@@ -358,36 +366,42 @@ public record AdminRunListResponse(AdminPageResponse<AdminRunSummaryDto> page) {
 }
 ```
 
-- [ ] **Step 2: Write service tests**
+- [ ] **Step 2：写失败测试**
 
-Test the service with a small in-memory `JdbcTemplate` mock or Mockito mock:
+`AdminRunListServiceTest` 覆盖：
 
 ```text
-listRuns normalizes page < 1 to 1
-listRuns clamps pageSize > 100 to 100
-listRuns filters by status when status is supplied
-listRuns filters by userId when userId is supplied
-listRuns always orders by agent_run.updated_at desc
+page < 1 时归一为 1
+pageSize > 100 时截断为 100
+传 status 时按 status 过滤
+传 userId 时按 userId 过滤
+排序固定为 agent_run.updated_at desc
+provider/model 从 agent_run_context 读取
 ```
 
-Run:
+运行：
 
 ```bash
 mvn -q -Dtest=com.ai.agent.web.admin.service.AdminRunListServiceTest test
 ```
 
-Expected before implementation: compile failure.
+预期：编译失败，因为 service 和 DTO 尚不存在。
 
-- [ ] **Step 3: Implement with JdbcTemplate**
+- [ ] **Step 3：实现查询服务**
 
-Use `JdbcTemplate` for this read-only console query to avoid changing core MyBatis mappers for admin-only projections. Keep SQL safe:
+使用 `JdbcTemplate` 实现只读 console 查询，不为 admin-only projection 改核心 MyBatis mapper。
 
-- no dynamic table names
-- no dynamic sort columns
-- no `${}` style interpolation
-- fixed `ORDER BY r.updated_at DESC`
+安全约束：
 
-The query must join `agent_run_context` because provider/model live there:
+```text
+不允许动态表名
+不允许动态排序列
+不允许 `${}` 拼接 SQL
+所有参数必须走 bind parameter
+ORDER BY 固定为 r.updated_at DESC
+```
+
+查询必须 join `agent_run_context`，因为 provider/model 存在那里：
 
 ```sql
 SELECT r.run_id,
@@ -407,26 +421,36 @@ SELECT r.run_id,
        r.last_error
 FROM agent_run r
 LEFT JOIN agent_run_context c ON c.run_id = r.run_id
-WHERE (:status is absent or r.status = ?)
-  AND (:userId is absent or r.user_id = ?)
+WHERE 1 = 1
 ORDER BY r.updated_at DESC
 LIMIT ? OFFSET ?
 ```
 
-Build the SQL with conditional fragments only for status/userId and bind every value through parameters.
+只有 `status` 和 `userId` 两个可选过滤条件可以追加到 `WHERE`：
 
-- [ ] **Step 4: Verify**
+```java
+if (StringUtils.hasText(status)) {
+    sql.append(" AND r.status = ?");
+    args.add(status);
+}
+if (StringUtils.hasText(userId)) {
+    sql.append(" AND r.user_id = ?");
+    args.add(userId);
+}
+```
 
-Run:
+- [ ] **Step 4：验证**
+
+运行：
 
 ```bash
 mvn -q -Dtest=com.ai.agent.web.admin.service.AdminRunListServiceTest test
 mvn -q -DskipTests compile
 ```
 
-Expected: pass.
+预期：全部通过。
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5：提交**
 
 ```bash
 git add src/main/java/com/ai/agent/web/admin/dto/AdminPageResponse.java \
@@ -437,18 +461,18 @@ git add src/main/java/com/ai/agent/web/admin/dto/AdminPageResponse.java \
 git commit -m "feat(console): add run list query service"
 ```
 
-### Task 3: Add Runtime State Service
+### Task 3：增加 Runtime State 查询服务
 
-**Files:**
+**文件：**
 
-- Create: `src/main/java/com/ai/agent/web/admin/dto/AdminRedisEntryDto.java`
-- Create: `src/main/java/com/ai/agent/web/admin/dto/AdminRuntimeStateDto.java`
-- Create: `src/main/java/com/ai/agent/web/admin/service/AdminRuntimeStateService.java`
-- Test: `src/test/java/com/ai/agent/web/admin/service/AdminRuntimeStateServiceTest.java`
+- 新建：`src/main/java/com/ai/agent/web/admin/dto/AdminRedisEntryDto.java`
+- 新建：`src/main/java/com/ai/agent/web/admin/dto/AdminRuntimeStateDto.java`
+- 新建：`src/main/java/com/ai/agent/web/admin/service/AdminRuntimeStateService.java`
+- 测试：`src/test/java/com/ai/agent/web/admin/service/AdminRuntimeStateServiceTest.java`
 
-- [ ] **Step 1: Define runtime DTOs**
+- [ ] **Step 1：定义 DTO**
 
-The DTO must be scoped to one run and must not support arbitrary Redis key reads:
+DTO 只能表达单个 run 的 runtime state，不支持任意 Redis key 读取：
 
 ```java
 public record AdminRedisEntryDto(
@@ -472,31 +496,30 @@ public record AdminRuntimeStateDto(
 }
 ```
 
-- [ ] **Step 2: Write service tests**
+- [ ] **Step 2：写失败测试**
 
-Cover these cases:
+`AdminRuntimeStateServiceTest` 覆盖：
 
 ```text
-active set contains runId -> activeRun true
-HASH key is returned as map
-ZSET key is returned as ordered entries with score
-missing key returns value null and type none
-service only reads keys derived from RedisKeys for the supplied runId
+active set 包含 runId 时 activeRun=true
+HASH key 返回 map
+ZSET key 返回按 score 排序的 value/score 列表
+缺失 key 返回 type=none, value=null
+service 只读取 RedisKeys 派生出的固定 key
+confirm-tokens 不会出现在结果中
 ```
 
-Run:
+运行：
 
 ```bash
 mvn -q -Dtest=com.ai.agent.web.admin.service.AdminRuntimeStateServiceTest test
 ```
 
-Expected before implementation: compile failure.
+预期：编译失败，因为 service 和 DTO 尚不存在。
 
-- [ ] **Step 3: Implement runtime state reader**
+- [ ] **Step 3：实现 runtime state reader**
 
-Use existing `RedisKeys` and `StringRedisTemplate`.
-
-Read these keys only:
+使用现有 `RedisKeys` 和 `StringRedisTemplate`。只读取这些 key：
 
 ```text
 agent:active-runs
@@ -506,36 +529,43 @@ agent:{run:<runId>}:tools
 agent:{run:<runId>}:tool-use-ids
 agent:{run:<runId>}:leases
 agent:{run:<runId>}:continuation-lock
+agent:{run:<runId>}:control
 agent:{run:<runId>}:llm-call-budget
 agent:{run:<runId>}:children
 agent:{run:<runId>}:todos
 agent:{run:<runId>}:todo-reminder
 ```
 
-Value rules:
+Redis 类型到 DTO 的映射：
 
 | Redis type | DTO value |
 |---|---|
 | `hash` | `Map<Object,Object>` |
-| `zset` | list of `{value, score}` maps |
-| `set` | sorted list |
+| `zset` | `List<Map<String,Object>>`，包含 `value` 和 `score` |
+| `set` | 排序后的 list |
 | `string` | string value |
 | `none` | `null` |
 
-Do not read `confirm-tokens`. Do not scan by wildcard.
+明确禁止：
 
-- [ ] **Step 4: Verify**
+```text
+不读 confirm-tokens
+不按 wildcard scan
+不把 Redis key 放到 path variable 让用户指定
+```
 
-Run:
+- [ ] **Step 4：验证**
+
+运行：
 
 ```bash
 mvn -q -Dtest=com.ai.agent.web.admin.service.AdminRuntimeStateServiceTest test
 mvn -q -DskipTests compile
 ```
 
-Expected: pass.
+预期：全部通过。
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5：提交**
 
 ```bash
 git add src/main/java/com/ai/agent/web/admin/dto/AdminRedisEntryDto.java \
@@ -545,51 +575,56 @@ git add src/main/java/com/ai/agent/web/admin/dto/AdminRedisEntryDto.java \
 git commit -m "feat(console): add runtime state service"
 ```
 
-### Task 4: Add Admin Console Controller
+### Task 4：增加 Admin Console Controller
 
-**Files:**
+**文件：**
 
-- Create: `src/main/java/com/ai/agent/web/admin/controller/AdminConsoleController.java`
-- Test: `src/test/java/com/ai/agent/web/admin/controller/AdminConsoleControllerTest.java`
+- 新建：`src/main/java/com/ai/agent/web/admin/controller/AdminConsoleController.java`
+- 测试：`src/test/java/com/ai/agent/web/admin/controller/AdminConsoleControllerTest.java`
 
-- [ ] **Step 1: Write controller tests**
+- [ ] **Step 1：写失败测试**
 
-Use standalone MockMvc. Cover:
+使用 standalone MockMvc 覆盖：
 
 ```text
-GET /api/admin/console/runs returns page response
-GET /api/admin/console/runs passes status/userId/page/pageSize to service
-GET /api/admin/console/runs/{runId}/runtime-state returns runtime state
-invalid admin token returns 403
-admin disabled returns 503
+GET /api/admin/console/runs 返回 page response
+GET /api/admin/console/runs 会把 status/userId/page/pageSize 传给 service
+GET /api/admin/console/runs/{runId}/runtime-state 返回 runtime state
+admin token 错误返回 403
+admin disabled 返回 503
+page/pageSize 非法时返回 400
 ```
 
-Run:
+运行：
 
 ```bash
 mvn -q -Dtest=com.ai.agent.web.admin.controller.AdminConsoleControllerTest test
 ```
 
-Expected before implementation: compile failure.
+预期：编译失败，因为 controller 尚不存在。
 
-- [ ] **Step 2: Implement controller**
+- [ ] **Step 2：实现 controller**
 
-Controller contract:
+接口契约：
 
 ```text
 GET /api/admin/console/runs?page=1&pageSize=20&status=RUNNING&userId=demo-user
 GET /api/admin/console/runs/{runId}/runtime-state
 ```
 
-Every method receives optional header:
+每个方法读取可选 header：
 
 ```text
 X-Admin-Token
 ```
 
-Every method calls `AdminAccessGuard.assertAllowed(token)` before service access.
+每个方法必须先调用：
 
-Page bounds:
+```java
+adminAccessGuard.assertAllowed(token);
+```
+
+分页边界：
 
 ```text
 page min = 1
@@ -597,7 +632,7 @@ pageSize default = 20
 pageSize max = 100
 ```
 
-Exception mapping:
+异常映射：
 
 | Exception | HTTP |
 |---|---|
@@ -605,18 +640,18 @@ Exception mapping:
 | `AdminDisabledException` | 503 |
 | `IllegalArgumentException` | 400 |
 
-- [ ] **Step 3: Verify backend gate**
+- [ ] **Step 3：验证后端 gate**
 
-Run:
+运行：
 
 ```bash
 mvn -q -Dtest=com.ai.agent.web.admin.controller.AdminConsoleControllerTest test
 MYSQL_PASSWORD='Qaz1234!' mvn test
 ```
 
-Expected: all tests pass.
+预期：全部通过。
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4：提交**
 
 ```bash
 git add src/main/java/com/ai/agent/web/admin/controller/AdminConsoleController.java \
@@ -626,25 +661,26 @@ git commit -m "feat(console): add admin console endpoints"
 
 ---
 
-## 4. M2 Frontend Shell
+## 4. M2 前端 Shell
 
-### Task 5: Initialize Frontend Project in `admin-web`
+### Task 5：初始化 `admin-web` 前端工程
 
-**Files:**
+**文件：**
 
-- Create: `admin-web/package.json`
-- Create: `admin-web/vite.config.ts`
-- Create: `admin-web/tailwind.config.ts`
-- Create: `admin-web/postcss.config.js`
-- Create: `admin-web/tsconfig.json`
-- Create: `admin-web/index.html`
-- Create: `admin-web/src/main.tsx`
-- Create: `admin-web/src/App.tsx`
-- Create: `admin-web/src/index.css`
+- 新建：`admin-web/package.json`
+- 新建：`admin-web/vite.config.ts`
+- 新建：`admin-web/tailwind.config.ts`
+- 新建：`admin-web/postcss.config.js`
+- 新建：`admin-web/tsconfig.json`
+- 新建：`admin-web/index.html`
+- 新建：`admin-web/src/main.tsx`
+- 新建：`admin-web/src/App.tsx`
+- 新建：`admin-web/src/index.css`
+- 测试：`admin-web/src/App.test.tsx`
 
-- [ ] **Step 1: Create Vite project skeleton**
+- [ ] **Step 1：创建 Vite React TypeScript 工程骨架**
 
-Use React + TypeScript. Dependencies:
+`package.json` 使用以下依赖：
 
 ```json
 {
@@ -667,22 +703,17 @@ Use React + TypeScript. Dependencies:
     "typescript": "^5.4.5",
     "vite": "^5.1.6",
     "vitest": "^1.4.0"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "test": "vitest run",
+    "test:watch": "vitest"
   }
 }
 ```
 
-Scripts:
-
-```json
-{
-  "dev": "vite --host 127.0.0.1",
-  "build": "tsc -b && vite build",
-  "test": "vitest run",
-  "test:watch": "vitest"
-}
-```
-
-Vite proxy:
+Vite proxy：
 
 ```ts
 server: {
@@ -696,9 +727,9 @@ server: {
 }
 ```
 
-- [ ] **Step 2: Add theme CSS**
+- [ ] **Step 2：增加基础主题**
 
-Use a restrained operations-console palette:
+`admin-web/src/index.css` 使用安静、工作台风格的配色：
 
 ```css
 :root {
@@ -706,15 +737,30 @@ Use a restrained operations-console palette:
   background: #f5f3ec;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
 ```
 
-Avoid decorative gradient orbs. Use panels, tables, timelines, and compact controls.
+设计约束：
 
-- [ ] **Step 3: Add smoke test**
+```text
+不用装饰性渐变球
+不用营销式 hero
+不用卡片套卡片
+控制台优先，密度适中，信息可扫描
+按钮内优先使用 lucide icon
+```
 
-Create `admin-web/src/App.test.tsx`:
+- [ ] **Step 3：写 smoke test**
+
+`admin-web/src/App.test.tsx`：
 
 ```ts
+import '@testing-library/jest-dom/vitest';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import App from './App';
@@ -727,9 +773,9 @@ describe('App', () => {
 });
 ```
 
-- [ ] **Step 4: Verify**
+- [ ] **Step 4：验证**
 
-Run:
+运行：
 
 ```bash
 cd admin-web
@@ -738,30 +784,30 @@ npm test
 npm run build
 ```
 
-Expected: all pass.
+预期：全部通过。
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5：提交**
 
 ```bash
 git add admin-web
 git commit -m "feat(console): initialize React frontend"
 ```
 
-### Task 6: Add Shared Types and API Clients
+### Task 6：增加共享类型和 API Client
 
-**Files:**
+**文件：**
 
-- Create: `admin-web/src/types/agent.ts`
-- Create: `admin-web/src/types/admin.ts`
-- Create: `admin-web/src/types/sse.ts`
-- Create: `admin-web/src/api/adminApi.ts`
-- Create: `admin-web/src/api/agentApi.ts`
-- Create: `admin-web/src/api/sseParser.ts`
-- Test: `admin-web/src/api/sseParser.test.ts`
+- 新建：`admin-web/src/types/agent.ts`
+- 新建：`admin-web/src/types/admin.ts`
+- 新建：`admin-web/src/types/sse.ts`
+- 新建：`admin-web/src/api/adminApi.ts`
+- 新建：`admin-web/src/api/agentApi.ts`
+- 新建：`admin-web/src/api/sseParser.ts`
+- 测试：`admin-web/src/api/sseParser.test.ts`
 
-- [ ] **Step 1: Define backend-aligned types**
+- [ ] **Step 1：定义和后端对齐的类型**
 
-Important names must match current backend SSE payloads:
+`RunStatus`：
 
 ```ts
 export type RunStatus =
@@ -776,6 +822,8 @@ export type RunStatus =
   | 'TIMEOUT';
 ```
 
+SSE event name：
+
 ```ts
 export type SseEventName =
   | 'text_delta'
@@ -787,11 +835,17 @@ export type SseEventName =
   | 'ping';
 ```
 
-Use `toolName`, not `name`, for `tool_use`.
+字段名要求：
 
-- [ ] **Step 2: Implement POST SSE parser**
+```text
+tool_use 使用 toolName，不使用 name
+final 使用 finalText、status、nextActionRequired
+前端类型必须贴近当前后端 DTO，不额外发明字段
+```
 
-Do not use `EventSource` for chat, because chat uses POST. Implement a parser for chunks shaped like:
+- [ ] **Step 2：实现 POST SSE parser**
+
+Chat 使用 POST，所以不能用浏览器 `EventSource`。实现基于 `fetch + ReadableStream` 的 parser，解析这样的 chunk：
 
 ```text
 event: text_delta
@@ -801,19 +855,19 @@ event: final
 data: {"runId":"...","status":"SUCCEEDED"}
 ```
 
-Parser tests must cover:
+`sseParser.test.ts` 覆盖：
 
 ```text
-single event in one chunk
-one event split across two chunks
-multiple events in one chunk
-ping event ignored by chat transcript but preserved in debug log
-invalid JSON becomes parser error event
+单个 chunk 中一个 event
+一个 event 被拆成两个 chunk
+一个 chunk 中多个 event
+ping event 保留到 debug log，但不写入 chat transcript
+JSON 非法时产生 parser error event
 ```
 
-- [ ] **Step 3: Implement API clients**
+- [ ] **Step 3：实现 API client**
 
-`agentApi.ts`:
+`agentApi.ts` 暴露：
 
 ```text
 createRun(userId, request, onEvent)
@@ -823,18 +877,24 @@ abortRun(userId, runId)
 interruptRun(userId, runId)
 ```
 
-`adminApi.ts`:
+`adminApi.ts` 暴露：
 
 ```text
 listRuns(params, adminToken)
 getRuntimeState(runId, adminToken)
 ```
 
-Every request must send `X-User-Id` for `/api/agent/*`. Admin requests send `X-Admin-Token` only when provided.
+请求 header 规则：
 
-- [ ] **Step 4: Verify**
+```text
+/api/agent/* 必须发送 X-User-Id
+/api/admin/* 只有提供 adminToken 时才发送 X-Admin-Token
+不在 console.log 中打印 adminToken
+```
 
-Run:
+- [ ] **Step 4：验证**
+
+运行：
 
 ```bash
 cd admin-web
@@ -842,33 +902,33 @@ npm test
 npm run build
 ```
 
-Expected: pass.
+预期：全部通过。
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5：提交**
 
 ```bash
 git add admin-web/src/types admin-web/src/api
 git commit -m "feat(console): add API clients and SSE parser"
 ```
 
-### Task 7: Build Console Shell
+### Task 7：构建 Console Shell
 
-**Files:**
+**文件：**
 
-- Create: `admin-web/src/components/shell/ConsoleShell.tsx`
-- Create: `admin-web/src/components/shell/Toolbar.tsx`
-- Create: `admin-web/src/components/ui/Button.tsx`
-- Create: `admin-web/src/components/ui/IconButton.tsx`
-- Create: `admin-web/src/components/ui/Badge.tsx`
-- Create: `admin-web/src/components/ui/EmptyState.tsx`
-- Create: `admin-web/src/components/ui/ErrorBanner.tsx`
-- Create: `admin-web/src/components/ui/Spinner.tsx`
-- Modify: `admin-web/src/App.tsx`
-- Test: `admin-web/src/components/shell/ConsoleShell.test.tsx`
+- 新建：`admin-web/src/components/shell/ConsoleShell.tsx`
+- 新建：`admin-web/src/components/shell/Toolbar.tsx`
+- 新建：`admin-web/src/components/ui/Button.tsx`
+- 新建：`admin-web/src/components/ui/IconButton.tsx`
+- 新建：`admin-web/src/components/ui/Badge.tsx`
+- 新建：`admin-web/src/components/ui/EmptyState.tsx`
+- 新建：`admin-web/src/components/ui/ErrorBanner.tsx`
+- 新建：`admin-web/src/components/ui/Spinner.tsx`
+- 修改：`admin-web/src/App.tsx`
+- 测试：`admin-web/src/components/shell/ConsoleShell.test.tsx`
 
-- [ ] **Step 1: Layout**
+- [ ] **Step 1：实现三栏布局**
 
-Use a dense, console-style three-panel layout:
+桌面布局：
 
 ```text
 header 48px
@@ -878,30 +938,37 @@ main grid:
   right 380px min, 32vw max
 ```
 
-Mobile fallback:
+移动端布局：
 
 ```text
 tabs: Runs | Timeline | Chat
 ```
 
-- [ ] **Step 2: UI components**
+- [ ] **Step 2：实现基础 UI 组件**
 
-Buttons should use lucide icons where available:
+按钮图标：
 
 ```text
-RefreshCw for refresh
-Square for interrupt
-Ban for abort
-Plus for new chat
-Bug for debug
-Send for send
+RefreshCw -> refresh
+Square    -> interrupt
+Ban       -> abort
+Plus      -> new chat
+Bug       -> debug
+Send      -> send
 ```
 
-Use 8px radius. Avoid nested cards.
+视觉约束：
 
-- [ ] **Step 3: Verify**
+```text
+border-radius 最大 8px
+按钮文本不能溢出
+紧凑面板内不用 hero 大字
+不做 nested card
+```
 
-Run:
+- [ ] **Step 3：验证**
+
+运行：
 
 ```bash
 cd admin-web
@@ -909,9 +976,9 @@ npm test
 npm run build
 ```
 
-Expected: shell renders `Runs`, `Timeline`, `Chat`.
+预期：shell 能渲染 `Runs`、`Timeline`、`Chat` 三个区域。
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4：提交**
 
 ```bash
 git add admin-web/src/components admin-web/src/App.tsx
@@ -920,21 +987,21 @@ git commit -m "feat(console): add console shell layout"
 
 ---
 
-## 5. M3 Real Data Integration
+## 5. M3 接入真实数据
 
-### Task 8: Build Run List Panel
+### Task 8：构建 Run List Panel
 
-**Files:**
+**文件：**
 
-- Create: `admin-web/src/hooks/useRunList.ts`
-- Create: `admin-web/src/components/runs/RunListPanel.tsx`
-- Create: `admin-web/src/components/runs/RunListItem.tsx`
-- Create: `admin-web/src/components/runs/RunFilters.tsx`
-- Test: `admin-web/src/components/runs/RunListPanel.test.tsx`
+- 新建：`admin-web/src/hooks/useRunList.ts`
+- 新建：`admin-web/src/components/runs/RunListPanel.tsx`
+- 新建：`admin-web/src/components/runs/RunListItem.tsx`
+- 新建：`admin-web/src/components/runs/RunFilters.tsx`
+- 测试：`admin-web/src/components/runs/RunListPanel.test.tsx`
 
-- [ ] **Step 1: Hook behavior**
+- [ ] **Step 1：实现 hook 状态**
 
-`useRunList` state:
+`useRunList` 维护：
 
 ```text
 rows
@@ -949,25 +1016,31 @@ refresh()
 selectRun(run)
 ```
 
-Refresh should not clear current selection unless selected run disappears from the returned page.
+刷新规则：
 
-- [ ] **Step 2: Panel behavior**
+```text
+refresh 不主动清空当前选择
+如果当前 selectedRunId 不在返回页面中，再清空或保持外部 selectedRunId 由 App 决定
+```
 
-Run item must show:
+- [ ] **Step 2：实现列表展示**
+
+每个 run item 展示：
 
 ```text
 status badge
-runId shortened
+短 runId
 userId
 provider/model
 turnNo
 updatedAt
-parent/child marker when parentRunId exists
+parentRunId 存在时显示 child marker
+parentLinkStatus 存在时显示 link status
 ```
 
-- [ ] **Step 3: Verify**
+- [ ] **Step 3：验证**
 
-Run:
+运行：
 
 ```bash
 cd admin-web
@@ -975,32 +1048,32 @@ npm test
 npm run build
 ```
 
-Expected: tests pass and panel can render empty/loading/error/data states.
+预期：loading、empty、error、data 状态都能正确渲染。
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4：提交**
 
 ```bash
 git add admin-web/src/hooks/useRunList.ts admin-web/src/components/runs
 git commit -m "feat(console): add run list panel"
 ```
 
-### Task 9: Build Timeline Panel
+### Task 9：构建 Timeline Panel
 
-**Files:**
+**文件：**
 
-- Create: `admin-web/src/hooks/useRunDetail.ts`
-- Create: `admin-web/src/components/timeline/TimelinePanel.tsx`
-- Create: `admin-web/src/components/timeline/TimelineItem.tsx`
-- Create: `admin-web/src/components/timeline/MessageNode.tsx`
-- Create: `admin-web/src/components/timeline/LlmAttemptNode.tsx`
-- Create: `admin-web/src/components/timeline/ToolCallNode.tsx`
-- Create: `admin-web/src/components/timeline/EventNode.tsx`
-- Create: `admin-web/src/components/timeline/CompactionNode.tsx`
-- Test: `admin-web/src/components/timeline/TimelinePanel.test.tsx`
+- 新建：`admin-web/src/hooks/useRunDetail.ts`
+- 新建：`admin-web/src/components/timeline/TimelinePanel.tsx`
+- 新建：`admin-web/src/components/timeline/TimelineItem.tsx`
+- 新建：`admin-web/src/components/timeline/MessageNode.tsx`
+- 新建：`admin-web/src/components/timeline/LlmAttemptNode.tsx`
+- 新建：`admin-web/src/components/timeline/ToolCallNode.tsx`
+- 新建：`admin-web/src/components/timeline/EventNode.tsx`
+- 新建：`admin-web/src/components/timeline/CompactionNode.tsx`
+- 测试：`admin-web/src/components/timeline/TimelinePanel.test.tsx`
 
-- [ ] **Step 1: Build merged timeline model**
+- [ ] **Step 1：构建合并 timeline model**
 
-Merge trajectory DTO arrays into one sorted display list:
+把 trajectory DTO 数组合并成一个展示序列：
 
 ```text
 messages       -> MESSAGE
@@ -1012,28 +1085,29 @@ events         -> EVENT
 compactions    -> COMPACTION
 ```
 
-If exact timestamps tie or are missing, preserve stable grouping:
+排序规则：
 
 ```text
-message -> tool call -> tool progress -> tool result -> event
+优先按时间排序
+如果时间相同或缺失，稳定顺序为 message -> tool call -> tool progress -> tool result -> event -> compaction
 ```
 
-- [ ] **Step 2: Render nodes**
+- [ ] **Step 2：实现节点渲染**
 
-Required visible fields:
+必须展示的字段：
 
 ```text
-MESSAGE: role, preview content, toolUseId when present
-LLM_ATTEMPT: provider, model, status, finishReason, token usage
-TOOL_CALL: toolName, concurrent/idempotent, precheckFailed
-TOOL_RESULT: status, synthetic, cancelReason, result preview
-EVENT: eventType, payload preview
-COMPACTION: strategy, beforeTokens, afterTokens, compacted count
+MESSAGE: role、content preview、toolUseId
+LLM_ATTEMPT: provider、model、status、finishReason、token usage
+TOOL_CALL: toolName、concurrent/idempotent、precheckFailed
+TOOL_RESULT: status、synthetic、cancelReason、result preview
+EVENT: eventType、payload preview
+COMPACTION: strategy、beforeTokens、afterTokens、compacted count
 ```
 
-- [ ] **Step 3: Verify**
+- [ ] **Step 3：验证**
 
-Run:
+运行：
 
 ```bash
 cd admin-web
@@ -1041,56 +1115,63 @@ npm test
 npm run build
 ```
 
-Expected: timeline renders a fixture containing all item types.
+预期：包含所有 item 类型的 fixture 能完整渲染。
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4：提交**
 
 ```bash
 git add admin-web/src/hooks/useRunDetail.ts admin-web/src/components/timeline
 git commit -m "feat(console): add run timeline panel"
 ```
 
-### Task 10: Build Runtime State Debug View
+### Task 10：构建 Runtime State Debug View
 
-**Files:**
+**文件：**
 
-- Create: `admin-web/src/hooks/useRuntimeState.ts`
-- Create: `admin-web/src/components/debug/DebugDrawer.tsx`
-- Create: `admin-web/src/components/debug/RuntimeStateView.tsx`
-- Test: `admin-web/src/components/debug/RuntimeStateView.test.tsx`
+- 新建：`admin-web/src/hooks/useRuntimeState.ts`
+- 新建：`admin-web/src/components/debug/DebugDrawer.tsx`
+- 新建：`admin-web/src/components/debug/RuntimeStateView.tsx`
+- 测试：`admin-web/src/components/debug/RuntimeStateView.test.tsx`
 
-- [ ] **Step 1: Hook behavior**
+- [ ] **Step 1：实现 hook 行为**
 
-`useRuntimeState(runId)` fetches:
+`useRuntimeState(runId)` 请求：
 
 ```text
 GET /api/admin/console/runs/{runId}/runtime-state
 ```
 
-It should refresh when:
+刷新时机：
 
 ```text
-selected run changes
-user clicks refresh
-chat receives tool_use / tool_result / final event
+selected run 改变
+用户点击 refresh
+chat 收到 tool_use / tool_result / final event
 ```
 
-- [ ] **Step 2: Runtime display**
+- [ ] **Step 2：分组展示 runtime state**
 
-Group entries by purpose:
+分组：
 
 ```text
-Control: meta, continuation-lock, llm-call-budget
+Control: meta, continuation-lock, control, llm-call-budget
 Tool Runtime: queue, tools, tool-use-ids, leases
 Planning: todos, todo-reminder
 SubAgent: children
+Active: active-runs
 ```
 
-Do not render `confirm-tokens`.
+安全要求：
 
-- [ ] **Step 3: Verify**
+```text
+不展示 confirm-tokens
+不允许用户输入 Redis key
+大 JSON 用折叠 preview 展示
+```
 
-Run:
+- [ ] **Step 3：验证**
+
+运行：
 
 ```bash
 cd admin-web
@@ -1098,9 +1179,9 @@ npm test
 npm run build
 ```
 
-Expected: runtime state renders missing keys gracefully.
+预期：缺失 key 能正常展示，不会报错。
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4：提交**
 
 ```bash
 git add admin-web/src/hooks/useRuntimeState.ts admin-web/src/components/debug
@@ -1109,19 +1190,19 @@ git commit -m "feat(console): add runtime state debug view"
 
 ---
 
-## 6. M4 Chat and SSE
+## 6. M4 Chat 和 SSE
 
-### Task 11: Build Chat Stream Hook
+### Task 11：构建 Chat Stream Hook
 
-**Files:**
+**文件：**
 
-- Create: `admin-web/src/hooks/useChatStream.ts`
-- Create: `admin-web/src/components/debug/SseEventLog.tsx`
-- Test: `admin-web/src/hooks/useChatStream.test.tsx`
+- 新建：`admin-web/src/hooks/useChatStream.ts`
+- 新建：`admin-web/src/components/debug/SseEventLog.tsx`
+- 测试：`admin-web/src/hooks/useChatStream.test.tsx`
 
-- [ ] **Step 1: State model**
+- [ ] **Step 1：定义状态模型**
 
-`useChatStream` owns:
+`useChatStream` 维护：
 
 ```text
 currentRunId
@@ -1134,27 +1215,38 @@ nextActionRequired
 error
 ```
 
-It must not store or display `confirmToken`.
+安全要求：
 
-- [ ] **Step 2: Event handling**
+```text
+不能存储 confirmToken
+不能展示 confirmToken
+不能把 adminToken 写入 sseEvents
+```
 
-Event effects:
+- [ ] **Step 2：处理 SSE event**
+
+事件效果：
 
 | Event | State effect |
 |---|---|
-| `text_delta` | append to current assistant draft |
-| `tool_use` | add tool card |
-| `tool_progress` | update progress card |
-| `tool_result` | add result preview |
-| `final` | set runId/status/nextActionRequired, close draft |
-| `error` | set error, stop streaming |
-| `ping` | append only to debug log |
+| `text_delta` | append 到当前 assistant draft |
+| `tool_use` | 增加 tool card |
+| `tool_progress` | 更新 progress card |
+| `tool_result` | 增加 result preview |
+| `final` | 设置 runId/status/nextActionRequired，关闭 draft |
+| `error` | 设置 error，停止 streaming |
+| `ping` | 只进入 debug log，不进入 chat transcript |
 
-`WAITING_USER_CONFIRMATION` and `PAUSED + user_input` both require user continuation UI.
+交互要求：
 
-- [ ] **Step 3: Verify**
+```text
+WAITING_USER_CONFIRMATION -> 显示确认/拒绝 bar
+PAUSED + user_input -> composer 提示用户补充信息
+```
 
-Run:
+- [ ] **Step 3：验证**
+
+运行：
 
 ```bash
 cd admin-web
@@ -1162,29 +1254,29 @@ npm test
 npm run build
 ```
 
-Expected: tests cover happy path, HITL confirmation, recoverable user input, and error event.
+预期：测试覆盖 happy path、HITL confirmation、可恢复 user input、error event。
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4：提交**
 
 ```bash
 git add admin-web/src/hooks/useChatStream.ts admin-web/src/components/debug/SseEventLog.tsx
 git commit -m "feat(console): add chat stream state"
 ```
 
-### Task 12: Build Chat Panel
+### Task 12：构建 Chat Panel
 
-**Files:**
+**文件：**
 
-- Create: `admin-web/src/components/chat/ChatPanel.tsx`
-- Create: `admin-web/src/components/chat/ChatTranscript.tsx`
-- Create: `admin-web/src/components/chat/ChatComposer.tsx`
-- Create: `admin-web/src/components/chat/RunControls.tsx`
-- Create: `admin-web/src/components/chat/ConfirmationBar.tsx`
-- Test: `admin-web/src/components/chat/ChatPanel.test.tsx`
+- 新建：`admin-web/src/components/chat/ChatPanel.tsx`
+- 新建：`admin-web/src/components/chat/ChatTranscript.tsx`
+- 新建：`admin-web/src/components/chat/ChatComposer.tsx`
+- 新建：`admin-web/src/components/chat/RunControls.tsx`
+- 新建：`admin-web/src/components/chat/ConfirmationBar.tsx`
+- 测试：`admin-web/src/components/chat/ChatPanel.test.tsx`
 
-- [ ] **Step 1: Chat create**
+- [ ] **Step 1：实现创建 run**
 
-Default request:
+默认请求：
 
 ```json
 {
@@ -1207,29 +1299,29 @@ Default request:
 }
 ```
 
-Send to:
+发送到：
 
 ```text
 POST /api/agent/runs
 X-User-Id: <selected userId>
 ```
 
-- [ ] **Step 2: Chat continuation**
+- [ ] **Step 2：实现 continuation**
 
-For `WAITING_USER_CONFIRMATION`:
+`WAITING_USER_CONFIRMATION`：
 
 ```text
 Confirm button -> content "确认继续执行"
 Reject button  -> content "放弃本次操作"
 ```
 
-For `PAUSED + user_input`:
+`PAUSED + user_input`：
 
 ```text
-Composer placeholder changes to "补充订单号、说明或下一步指令..."
+composer placeholder = "补充订单号、说明或下一步指令..."
 ```
 
-Send to:
+发送到：
 
 ```text
 POST /api/agent/runs/{runId}/messages
@@ -1237,9 +1329,9 @@ X-User-Id: <selected userId>
 body: {"message":{"role":"user","content":"..."}}
 ```
 
-- [ ] **Step 3: Run controls**
+- [ ] **Step 3：实现 run controls**
 
-Controls:
+控制项：
 
 ```text
 New Chat
@@ -1249,11 +1341,17 @@ Abort
 Toggle Debug
 ```
 
-Disable `Interrupt` and `Abort` when `runStatus` is terminal.
+禁用规则：
 
-- [ ] **Step 4: Verify**
+```text
+runStatus 是 terminal 时禁用 Interrupt 和 Abort
+isStreaming=true 时禁用重复 Send
+没有 selectedRunId 时禁用 Refresh Run
+```
 
-Run:
+- [ ] **Step 4：验证**
+
+运行：
 
 ```bash
 cd admin-web
@@ -1261,26 +1359,26 @@ npm test
 npm run build
 ```
 
-Expected: tests cover create, continue, confirm, reject, interrupt, abort button states.
+预期：测试覆盖 create、continue、confirm、reject、interrupt、abort 按钮状态。
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5：提交**
 
 ```bash
 git add admin-web/src/components/chat
 git commit -m "feat(console): add chat panel and controls"
 ```
 
-### Task 13: Wire App State Across Panels
+### Task 13：串联 App 全局状态
 
-**Files:**
+**文件：**
 
-- Modify: `admin-web/src/App.tsx`
-- Modify: `admin-web/src/components/shell/Toolbar.tsx`
-- Test: `admin-web/src/App.test.tsx`
+- 修改：`admin-web/src/App.tsx`
+- 修改：`admin-web/src/components/shell/Toolbar.tsx`
+- 测试：`admin-web/src/App.test.tsx`
 
-- [ ] **Step 1: Shared selected run**
+- [ ] **Step 1：App 持有共享状态**
 
-App owns:
+`App` 维护：
 
 ```text
 selectedRunId
@@ -1289,13 +1387,17 @@ adminToken from localStorage
 debugOpen
 ```
 
-When chat creates a run, set `selectedRunId` to the runId from first SSE event that contains runId.
+状态联动：
 
-When run list selection changes, load trajectory and runtime state for that run.
+```text
+chat 创建 run 后，从第一个包含 runId 的 SSE event 设置 selectedRunId
+run list 选择 run 后，timeline 和 runtime state 读取该 run
+chat 收到 final 后 refresh run list 和 timeline
+```
 
-- [ ] **Step 2: Toolbar**
+- [ ] **Step 2：实现 Toolbar**
 
-Toolbar fields:
+Toolbar 字段：
 
 ```text
 User ID input
@@ -1304,11 +1406,17 @@ Refresh runs
 Debug toggle
 ```
 
-Store `userId` and `adminToken` in localStorage. Never log admin token.
+存储规则：
 
-- [ ] **Step 3: Verify**
+```text
+userId 存入 localStorage
+adminToken 存入 localStorage
+不把 adminToken 打到 console 或 debug panel
+```
 
-Run:
+- [ ] **Step 3：验证**
+
+运行：
 
 ```bash
 cd admin-web
@@ -1316,9 +1424,9 @@ npm test
 npm run build
 ```
 
-Expected: selecting a run updates timeline and runtime debug view.
+预期：选择 run 后 timeline 和 runtime debug view 同步更新。
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4：提交**
 
 ```bash
 git add admin-web/src/App.tsx admin-web/src/components/shell/Toolbar.tsx
@@ -1327,31 +1435,38 @@ git commit -m "feat(console): wire run selection across panels"
 
 ---
 
-## 7. M5 Hardening and Demo
+## 7. M5 Hardening 和 Demo
 
-### Task 14: Add Local Demo Script
+### Task 14：增加本地 Demo 启动脚本和 README
 
-**Files:**
+**文件：**
 
-- Create: `scripts/start-console-dev.sh`
-- Modify: `README.md`
+- 新建：`scripts/start-console-dev.sh`
+- 修改：`README.md`
 
-- [ ] **Step 1: Script behavior**
+- [ ] **Step 1：实现启动脚本**
 
-The script should:
+脚本行为：
 
 ```text
-verify MySQL/Redis are reachable
-start Spring Boot on 8080 if not already listening
-start Vite admin-web on 5173
-print both URLs
+检查 MySQL 是否可连接
+检查 Redis 是否可连接
+如果 8080 未监听，启动 Spring Boot
+启动 Vite admin-web，端口 5173
+打印后端 URL 和前端 URL
 ```
 
-Do not embed provider API keys in the script.
+约束：
 
-- [ ] **Step 2: README section**
+```text
+脚本不内置 provider API key
+脚本不打印 secret
+如果端口已占用，说明如何处理，不静默换端口
+```
 
-Add Chinese section:
+- [ ] **Step 2：更新 README 中文说明**
+
+README 增加章节：
 
 ```text
 Agent Buyer Console
@@ -1362,7 +1477,7 @@ Agent Buyer Console
 - 推荐演示 prompt
 ```
 
-Recommended prompts:
+推荐演示 prompt：
 
 ```text
 取消我昨天的那个订单，先查订单再 dry-run
@@ -1371,83 +1486,83 @@ Recommended prompts:
 /purchase-guide 查询最近订单并结合 skill 给我建议
 ```
 
-- [ ] **Step 3: Verify**
+- [ ] **Step 3：验证**
 
-Run:
+运行：
 
 ```bash
 bash -n scripts/start-console-dev.sh
 ```
 
-Expected: no syntax errors.
+预期：无语法错误。
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4：提交**
 
 ```bash
 git add scripts/start-console-dev.sh README.md
 git commit -m "docs(console): add local console demo instructions"
 ```
 
-### Task 15: Add Integration and Browser Smoke
+### Task 15：增加集成测试和浏览器 Smoke
 
-**Files:**
+**文件：**
 
-- Create: `admin-web/src/test/fixtures/trajectory.ts`
-- Create: `admin-web/src/test/fixtures/sseEvents.ts`
-- Create: `admin-web/src/App.integration.test.tsx`
-- Optional create: `scripts/console-smoke.sh`
+- 新建：`admin-web/src/test/fixtures/trajectory.ts`
+- 新建：`admin-web/src/test/fixtures/sseEvents.ts`
+- 新建：`admin-web/src/App.integration.test.tsx`
+- 可选新建：`scripts/console-smoke.sh`
 
-- [ ] **Step 1: Frontend integration fixture**
+- [ ] **Step 1：准备前端集成 fixture**
 
-Fixture must contain:
-
-```text
-one run summary
-one USER message
-one ASSISTANT message with tool call
-one LLM attempt
-one tool call
-one tool progress
-one tool result
-one confirmation final SSE event
-one compaction
-one runtime-state response
-```
-
-- [ ] **Step 2: Integration test**
-
-Test renders `App` with mocked fetch and verifies:
+fixture 必须包含：
 
 ```text
-run list appears
-timeline item count includes message/tool/attempt/event
-chat text_delta updates transcript
-WAITING_USER_CONFIRMATION shows confirm/reject controls
-runtime state view hides confirm token
+一个 run summary
+一个 USER message
+一个 ASSISTANT message with tool call
+一个 LLM attempt
+一个 tool call
+一个 tool progress
+一个 tool result
+一个 confirmation final SSE event
+一个 compaction
+一个 runtime-state response
 ```
 
-- [ ] **Step 3: Browser smoke**
+- [ ] **Step 2：实现集成测试**
 
-Use Playwright or in-app browser after implementation:
+使用 mocked fetch 渲染 `App`，验证：
+
+```text
+run list 能显示
+timeline item 包含 message/tool/attempt/event
+chat text_delta 会更新 transcript
+WAITING_USER_CONFIRMATION 会显示确认/拒绝控件
+runtime state view 不展示 confirm token
+```
+
+- [ ] **Step 3：浏览器 smoke**
+
+实现后用 Playwright 或 in-app browser 检查：
 
 ```text
 desktop 1440x900 screenshot
 mobile 390x844 screenshot
-verify no overlapping panels
-verify text fits buttons
-verify chat can send prompt and receive SSE final
+没有面板重叠
+按钮文字不溢出
+chat 能发送 prompt 并收到 SSE final
 ```
 
-- [ ] **Step 4: Final verification**
+- [ ] **Step 4：最终验证**
 
-Run:
+运行：
 
 ```bash
 MYSQL_PASSWORD='Qaz1234!' mvn test
 cd admin-web && npm test && npm run build
 ```
 
-Then run a local smoke:
+真实 LLM e2e 作为单独 smoke：
 
 ```bash
 MYSQL_PASSWORD='Qaz1234!' \
@@ -1456,7 +1571,7 @@ QWEN_API_KEY='<local env only>' \
 ./scripts/real-llm-e2e.sh
 ```
 
-Expected:
+预期：
 
 ```text
 mvn test: BUILD SUCCESS
@@ -1465,7 +1580,7 @@ npm run build: success
 real-llm-e2e: full suite passed
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5：提交**
 
 ```bash
 git add admin-web/src/test admin-web/src/App.integration.test.tsx scripts/console-smoke.sh
@@ -1474,58 +1589,62 @@ git commit -m "test(console): add frontend integration smoke"
 
 ---
 
-## 8. Acceptance Criteria
+## 8. 验收标准
 
-### Product Acceptance
+### 8.1 产品验收
 
-- A user can create a run from the console and watch SSE text/tool events stream live.
-- A user can continue `WAITING_USER_CONFIRMATION` and `PAUSED + user_input` runs from the console.
-- A user can interrupt or abort an active run from the console.
-- Selecting a run shows trajectory timeline: messages, attempts, tools, events, progress, compactions.
-- Debug drawer shows current-run Redis runtime state without arbitrary key lookup.
-- Console uses real `/api/agent/*` chat endpoints rather than an admin chat proxy.
+- 用户可以从 console 创建 run，并实时看到 SSE text/tool events。
+- 用户可以继续 `WAITING_USER_CONFIRMATION` 和 `PAUSED + user_input` 的 run。
+- 用户可以从 console interrupt 或 abort 活跃 run。
+- 选择 run 后能看到 trajectory timeline：messages、attempts、tools、events、progress、compactions。
+- Debug drawer 能展示当前 run 的 Redis runtime state，但不能任意查 Redis key。
+- Console 使用真实 `/api/agent/*` chat endpoint，不新增 admin chat proxy。
 
-### Engineering Acceptance
+### 8.2 工程验收
 
-- New Java package path is `com/ai/agent/web/admin`, not `web.admin`.
-- Backend admin endpoints are covered by controller and service tests.
-- Frontend POST SSE uses `fetch + ReadableStream`, not `EventSource`.
-- Frontend and backend type names match current code: `toolName`, `finalText`, `nextActionRequired`, `RunStatus`.
-- No raw `confirmToken` appears in frontend state, timeline, runtime state, logs, or screenshots.
-- No generic `SELECT * FROM <user input>` or arbitrary Redis key endpoint exists.
-- `mvn test`, `npm test`, and `npm run build` pass before final handoff.
-
----
-
-## 9. Review Notes for Implementers
-
-Before starting each task:
-
-1. Check `git status --short`.
-2. Do not change unrelated backend V2 code.
-3. Write or update the test first.
-4. Keep commits small and named with `feat(console): ...`, `test(console): ...`, or `docs(console): ...`.
-5. If a task reveals a backend mismatch, update this plan or create a short progress note before coding around it.
-
-Known traps this plan avoids:
-
-- `AgentRunEntity` has no provider/model fields; use `agent_run_context`.
-- `UserMessage` constructor is `(role, content)`, not `(content, metadata)`.
-- `LlmParams` has four fields: `model`, `temperature`, `maxTokens`, `maxTurns`.
-- Spring SSE class is `SseAgentEventSink`, but frontend chat should call existing controller, not construct backend sinks.
-- Browser `EventSource` cannot POST; use `fetch` streaming for chat.
-- Redis keys contain braces and colons; do not put full Redis keys in path variables.
-- `confirm-tokens` is intentionally excluded from runtime-state output.
+- 新 Java package path 是 `com/ai/agent/web/admin`，不是 `web.admin`。
+- 后端 admin endpoint 有 controller test 和 service test。
+- 前端 POST SSE 使用 `fetch + ReadableStream`，不是 `EventSource`。
+- 前后端字段名对齐当前代码：`toolName`、`finalText`、`nextActionRequired`、`RunStatus`。
+- 前端 state、timeline、runtime state、日志、截图中都不能出现原始 `confirmToken`。
+- 不存在通用 `SELECT * FROM <user input>` 或任意 Redis key endpoint。
+- 最终交付前 `mvn test`、`npm test`、`npm run build` 全部通过。
 
 ---
 
-## 10. Execution Options
+## 9. 实现者注意事项
 
-Plan complete and saved to `docs/superpowers/plans/2026-05-02-admin-frontend-plan.md`.
+每个 task 开始前：
 
-Recommended execution:
+1. 运行 `git status --short`。
+2. 不修改无关 V2 后端代码。
+3. 先写或更新测试。
+4. 每个任务独立 commit，commit message 使用 `feat(console): ...`、`test(console): ...` 或 `docs(console): ...`。
+5. 如果发现后端契约和计划不一致，先更新计划或 progress note，再改代码。
 
-1. **Subagent-Driven:** one worker for M1 backend, one worker for M2/M3 frontend shell after M1 gate, one review pass after each milestone.
-2. **Inline Execution:** implement milestone by milestone in this session, with `mvn test` / `npm test` gates before proceeding.
+本计划特别避开的坑：
 
-Do not implement M4 chat before the M3 timeline can show a real run.
+- `AgentRunEntity` 没有 provider/model 字段，provider/model 在 `agent_run_context`。
+- `UserMessage` 构造是 `(role, content)`，不是 `(content, metadata)`。
+- `LlmParams` 当前字段是 `model`、`temperature`、`maxTokens`、`maxTurns`。
+- Spring SSE 类是 `SseAgentEventSink`，但前端只调用现有 controller，不构造后端 sink。
+- 浏览器 `EventSource` 不能 POST，chat streaming 使用 `fetch`。
+- Redis key 带 `{}` 和 `:`，不要把完整 Redis key 放进 path variable。
+- `confirm-tokens` 故意不进入 runtime-state 输出。
+
+---
+
+## 10. 执行方式
+
+计划已保存到：
+
+```text
+docs/superpowers/plans/2026-05-02-admin-frontend-plan.md
+```
+
+推荐执行方式：
+
+1. **Subagent-Driven：** M1 后端一个 worker；M2/M3 前端一个 worker；每个里程碑结束后做 review gate。
+2. **Inline Execution：** 在当前会话按里程碑顺序执行，每个 gate 跑完测试再进入下一阶段。
+
+不要在 M3 timeline 能展示真实 run trajectory 之前开始 M4 chat。
