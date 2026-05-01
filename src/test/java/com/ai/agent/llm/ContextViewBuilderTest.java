@@ -3,6 +3,7 @@ package com.ai.agent.llm;
 import com.ai.agent.config.AgentProperties;
 import com.ai.agent.tool.ToolCall;
 import com.ai.agent.trajectory.TrajectoryReader;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -22,7 +23,8 @@ class ContextViewBuilderTest {
                 reader,
                 new TranscriptPairValidator(),
                 noOpSpiller(),
-                noOpMicroCompactor()
+                noOpMicroCompactor(),
+                noOpSummaryCompactor()
         );
 
         ProviderContextView view = builder.build("run-1");
@@ -41,7 +43,8 @@ class ContextViewBuilderTest {
                 reader,
                 new TranscriptPairValidator(),
                 noOpSpiller(),
-                noOpMicroCompactor()
+                noOpMicroCompactor(),
+                noOpSummaryCompactor()
         );
 
         assertThatThrownBy(() -> builder.build("run-1"))
@@ -63,7 +66,8 @@ class ContextViewBuilderTest {
                 reader,
                 new TranscriptPairValidator(),
                 new LargeResultSpiller(properties, new TokenEstimator()),
-                noOpMicroCompactor()
+                noOpMicroCompactor(),
+                noOpSummaryCompactor()
         );
 
         ProviderContextView view = builder.build("run-1");
@@ -93,7 +97,8 @@ class ContextViewBuilderTest {
                 reader,
                 new TranscriptPairValidator(),
                 new LargeResultSpiller(properties, new TokenEstimator()),
-                new MicroCompactor(properties, new TokenEstimator())
+                new MicroCompactor(properties, new TokenEstimator()),
+                noOpSummaryCompactor()
         );
 
         ProviderContextView view = builder.build("run-1");
@@ -102,6 +107,47 @@ class ContextViewBuilderTest {
         assertThat(view.messages().get(1).content()).isEqualTo(MicroCompactor.OLD_TOOL_RESULT_PLACEHOLDER);
         assertThat(rawOldTool.content()).isEqualTo(tokenText(18));
         assertThat(reader.messages.get(1).content()).isEqualTo(tokenText(18));
+    }
+
+    @Test
+    void summaryCompactsAfterMicroCompactionWithoutMutatingRawTrajectory() {
+        FakeTrajectoryReader reader = new FakeTrajectoryReader();
+        reader.messages.add(LlmMessage.system("s1", "system prompt"));
+        reader.messages.add(LlmMessage.user("u1", "first"));
+        reader.messages.add(LlmMessage.assistant("a1", "second", List.of()));
+        reader.messages.add(LlmMessage.user("u2", "third"));
+        LlmMessage rawOldMessage = LlmMessage.user("u3", tokenText(18));
+        reader.messages.add(rawOldMessage);
+        reader.messages.add(LlmMessage.user("u4", "recent one"));
+        reader.messages.add(LlmMessage.assistant("a2", "recent two", List.of()));
+        reader.messages.add(LlmMessage.user("u5", "recent three"));
+        AgentProperties properties = new AgentProperties();
+        properties.getContext().setLargeResultThresholdTokens(Integer.MAX_VALUE);
+        properties.getContext().setMicroCompactThresholdTokens(12);
+        properties.getContext().setSummaryCompactThresholdTokens(12);
+        properties.getContext().setRecentMessageBudgetTokens(3);
+        ContextViewBuilder builder = new ContextViewBuilder(
+                reader,
+                new TranscriptPairValidator(),
+                new LargeResultSpiller(properties, new TokenEstimator()),
+                new MicroCompactor(properties, new TokenEstimator()),
+                new SummaryCompactor(
+                        properties,
+                        new TokenEstimator(),
+                        new DeterministicSummaryGenerator(new ObjectMapper()),
+                        new ObjectMapper()
+                )
+        );
+
+        ProviderContextView view = builder.build("run-1");
+
+        new TranscriptPairValidator().validate(view.messages());
+        assertThat(view.messages()).extracting(LlmMessage::messageId)
+                .containsExactly("s1", "u1", "a1", "u2", "summary-u3", "u4", "a2", "u5");
+        assertThat(view.messages().get(4).extras()).containsEntry("compactSummary", true);
+        assertThat(view.messages().get(4).extras()).containsEntry("compactedMessageIds", List.of("u3"));
+        assertThat(rawOldMessage.content()).isEqualTo(tokenText(18));
+        assertThat(reader.messages.get(4).content()).isEqualTo(tokenText(18));
     }
 
     private static LargeResultSpiller noOpSpiller() {
@@ -114,6 +160,17 @@ class ContextViewBuilderTest {
         AgentProperties properties = new AgentProperties();
         properties.getContext().setMicroCompactThresholdTokens(Integer.MAX_VALUE);
         return new MicroCompactor(properties, new TokenEstimator());
+    }
+
+    private static SummaryCompactor noOpSummaryCompactor() {
+        AgentProperties properties = new AgentProperties();
+        properties.getContext().setSummaryCompactThresholdTokens(Integer.MAX_VALUE);
+        return new SummaryCompactor(
+                properties,
+                new TokenEstimator(),
+                new DeterministicSummaryGenerator(new ObjectMapper()),
+                new ObjectMapper()
+        );
     }
 
     private static String tokenText(int tokenCount) {

@@ -67,3 +67,6 @@ agent:
     large-result-head-tokens: 200
     large-result-tail-tokens: 200
     micro-compact-threshold-tokens: 50000
+    summary-compact-threshold-tokens: 30000
+    recent-message-budget-tokens: 2000
+    summary-max-tokens: 1200

@@ -490,11 +490,38 @@ V2 必须按 `V2.0 -> V2.1 -> V2.2` 顺序推进，里程碑内部按 `task.md` 
 - 主 agent 复跑 full：`MYSQL_PASSWORD=*** mvn test`，130 tests，0 failures，0 errors，`BUILD SUCCESS`。
 - 状态：DONE。
 
-### V20-09 PENDING
+### V20-09 DONE
 
-- 写入范围：`SummaryCompactor`、summary JSON schema、`PromptAssembler` 注入 summary；不动原始 trajectory。
+- 写入范围：`SummaryCompactor`、`ProviderSummaryGenerator`、summary JSON schema、`ContextViewBuilder` provider view 接入；不动原始 trajectory。
 - 前置：`V20-08`。
 - 关注点：summary 必须包含 `summaryText / businessFacts / toolFacts / openQuestions / compactedMessageIds`；保留 system prompt 和最近消息预算窗口。
+
+启动记录：
+
+- 启动时间：2026-05-01 23:34 CST。
+- 工程判断：先抽 `SummaryGenerator`/`SummaryCompactor` 边界，保证 summary JSON schema、保留规则和 provider view 压缩正确；summary 生成不写 trajectory，不产生 assistant/tool replay message，只作为 context lifecycle 的内部 provider 调用。
+- TDD 目标：summary message 使用 `ASSISTANT + extras.compactSummary=true`；content 是 JSON 且包含 `summaryText/businessFacts/toolFacts/openQuestions/compactedMessageIds`；保留 system、前三条非 system、最近消息预算窗口；被 summary 覆盖的 assistant tool call 与 matching tool result 不被拆散。
+
+实现记录：
+
+- 实现时间：2026-05-01 23:38 CST。
+- 新增 `SummaryGenerator` 接口与 `ProviderSummaryGenerator`，生产默认通过配置 provider 生成 JSON summary；`DeterministicSummaryGenerator` 仅保留为测试用 generator，不注册为 Spring bean。
+- `ProviderSummaryGenerator` 使用 `agent.llm.provider` 对应 adapter，temperature 固定 `0.0`，`maxTokens` 使用 `agent.context.summary-max-tokens`；请求不传 tools，要求模型只输出 JSON object。
+- 新增 `SummaryCompactor`，从 `AgentProperties.context.summary-compact-threshold-tokens` 读取阈值，默认 `30000`；`recent-message-budget-tokens` 默认 `2000`。压缩仅作用 provider view，不写 MySQL raw trajectory。
+- `SummaryCompactor` 保留所有 `SYSTEM` message、前三条非 system message、最后 3 条 message，并在最近 3 条总 token 未达到 recent budget 时继续向前保留；assistant tool call 与 matching tool result 使用 block 一起保留或一起进入 summary，避免 provider pair validation 失败。
+- 修复 review P2：summary JSON 需要通过 `ObjectMapper` 解析并校验 `summaryText/businessFacts/toolFacts/openQuestions/compactedMessageIds`；`compactedMessageIds` 必须与实际被压缩 message id 完全一致。
+- 修复 review P2：assistant tool call block 按原始 transcript index 范围保留，避免多 tool result 按 tool call 顺序重排。
+- 修复 review P2：summary compact 后重新估算 token，若 provider view 仍超过 `agent-loop.hard-token-cap` 则 fail closed。
+- summary message 使用 `ASSISTANT` role，`extras.compactSummary=true`，`extras.compactedMessageIds` 记录被 summary 覆盖的 message id；summary content 中也包含相同 `compactedMessageIds`。
+- `ContextViewBuilder` 接入顺序更新为 raw `TranscriptPairValidator` -> `LargeResultSpiller` -> `MicroCompactor` -> `SummaryCompactor` -> final `TranscriptPairValidator`。
+- TDD 红灯：`mvn -Dtest=com.ai.agent.llm.SummaryCompactorTest test` 因缺失 `SummaryGenerator`、`SummaryCompactor`、summary/recent 配置编译失败。
+- review 修复红灯：`mvn -Dtest=com.ai.agent.llm.ProviderSummaryGeneratorTest,com.ai.agent.llm.SummaryCompactorTest test` 因缺少 `ProviderSummaryGenerator` 与 `summaryMaxTokens` 配置编译失败。
+- 第二轮 review 发现边界：`messagesToCompact.isEmpty()` 分支未校验 hard cap。先新增 `failsClosedWhenThresholdReachedButAllMessagesArePreserved` 红灯测试，再在该分支调用 `assertWithinHardTokenCap`。
+- 踩坑：`ProviderSummaryGenerator` 同时存在 public 构造器与 package-private 测试构造器时，Spring 无法选择构造器，导致 `ApplicationContext` 启动失败；修复为只保留一个 public 构造器，测试显式传入 `ObjectMapper`。
+- targeted 绿灯：`mvn -Dtest=com.ai.agent.llm.ProviderSummaryGeneratorTest,com.ai.agent.llm.SummaryCompactorTest,com.ai.agent.llm.ContextViewBuilderTest,com.ai.agent.api.AgentTurnOrchestratorBudgetTest test`，18 tests，0 failures，`BUILD SUCCESS`。
+- `java-alibaba-review`：三轮 review 后无未解决 P0/P1/P2；确认 provider-backed summary、hard cap fail closed、empty-compaction 分支测试覆盖。
+- 全量验证：`MYSQL_PASSWORD=*** mvn test`，142 tests，0 failures，0 errors，`BUILD SUCCESS`。
+- 状态：DONE。
 
 ### V20-10 PENDING
 

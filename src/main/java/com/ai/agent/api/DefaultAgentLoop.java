@@ -9,6 +9,8 @@ import com.ai.agent.llm.LargeResultSpiller;
 import com.ai.agent.llm.MicroCompactor;
 import com.ai.agent.llm.PromptAssembler;
 import com.ai.agent.llm.ContextViewBuilder;
+import com.ai.agent.llm.DeterministicSummaryGenerator;
+import com.ai.agent.llm.SummaryCompactor;
 import com.ai.agent.llm.TokenEstimator;
 import com.ai.agent.llm.TranscriptPairValidator;
 import com.ai.agent.tool.ConfirmTokenStore;
@@ -117,7 +119,13 @@ public final class DefaultAgentLoop implements AgentLoop {
                                 trajectoryReader,
                                 transcriptPairValidator,
                                 new LargeResultSpiller(properties, new TokenEstimator()),
-                                new MicroCompactor(properties, new TokenEstimator())
+                                new MicroCompactor(properties, new TokenEstimator()),
+                                new SummaryCompactor(
+                                        properties,
+                                        new TokenEstimator(),
+                                        new DeterministicSummaryGenerator(objectMapper),
+                                        objectMapper
+                                )
                         ),
                         new LlmAttemptService(new LlmProviderAdapterRegistry(List.of(providerAdapter)), trajectoryStore, objectMapper),
                         new ToolCallCoordinator(

@@ -12,6 +12,8 @@ import com.ai.agent.llm.LlmStreamListener;
 import com.ai.agent.llm.LlmStreamResult;
 import com.ai.agent.llm.LargeResultSpiller;
 import com.ai.agent.llm.MicroCompactor;
+import com.ai.agent.llm.DeterministicSummaryGenerator;
+import com.ai.agent.llm.SummaryCompactor;
 import com.ai.agent.llm.TokenEstimator;
 import com.ai.agent.llm.TranscriptPairValidator;
 import com.ai.agent.tool.CancelReason;
@@ -100,7 +102,13 @@ class AgentTurnOrchestratorBudgetTest {
                         trajectoryStore,
                         new TranscriptPairValidator(),
                         new LargeResultSpiller(properties, new TokenEstimator()),
-                        new MicroCompactor(properties, new TokenEstimator())
+                        new MicroCompactor(properties, new TokenEstimator()),
+                        new SummaryCompactor(
+                                properties,
+                                new TokenEstimator(),
+                                new DeterministicSummaryGenerator(objectMapper),
+                                objectMapper
+                        )
                 ),
                 new LlmAttemptService(new LlmProviderAdapterRegistry(List.of(provider)), trajectoryStore, objectMapper),
                 new ToolCallCoordinator(
