@@ -1,7 +1,9 @@
 package com.ai.agent.llm;
 
+import com.ai.agent.api.LlmCallBudgetExceededException;
 import com.ai.agent.config.AgentProperties;
 import com.ai.agent.domain.FinishReason;
+import com.ai.agent.trajectory.RunContext;
 import com.ai.agent.trajectory.TrajectoryStore;
 import com.ai.agent.util.Ids;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -29,6 +31,7 @@ public final class ProviderSummaryGenerator implements SummaryGenerator {
     private final LlmProviderAdapterRegistry providerRegistry;
     private final TrajectoryStore trajectoryStore;
     private final ObjectMapper objectMapper;
+    private final ProviderFallbackPolicy fallbackPolicy;
 
     public ProviderSummaryGenerator(
             AgentProperties properties,
@@ -40,13 +43,42 @@ public final class ProviderSummaryGenerator implements SummaryGenerator {
         this.providerRegistry = providerRegistry;
         this.trajectoryStore = trajectoryStore;
         this.objectMapper = objectMapper;
+        this.fallbackPolicy = new ProviderFallbackPolicy(objectMapper);
     }
 
     @Override
     public String generate(SummaryGenerationContext context, List<LlmMessage> messagesToCompact) {
-        LlmProviderAdapter provider = providerRegistry.resolve(properties.getLlm().getProvider());
         String attemptId = Ids.newId("summary_att");
-        String providerName = provider.providerName();
+        String primaryProviderName = primaryProviderName(context);
+        try {
+            return executeSummaryAttempt(context, messagesToCompact, attemptId, primaryProviderName);
+        } catch (RuntimeException primaryFailure) {
+            String fallbackProvider = fallbackProvider(context, primaryFailure);
+            if (fallbackProvider == null) {
+                throw primaryFailure;
+            }
+            String fallbackAttemptId = Ids.newId("summary_att");
+            try {
+                String summary = executeSummaryAttempt(context, messagesToCompact, fallbackAttemptId, fallbackProvider);
+                writeFallbackEvent(context.runId(), attemptId, fallbackAttemptId, primaryProviderName, fallbackProvider, primaryFailure);
+                return summary;
+            } catch (LlmCallBudgetExceededException budgetExceeded) {
+                throw budgetExceeded;
+            } catch (RuntimeException fallbackFailure) {
+                writeFallbackEvent(context.runId(), attemptId, fallbackAttemptId, primaryProviderName, fallbackProvider, primaryFailure);
+                throw fallbackFailure;
+            }
+        }
+    }
+
+    private String executeSummaryAttempt(
+            SummaryGenerationContext context,
+            List<LlmMessage> messagesToCompact,
+            String attemptId,
+            String providerName
+    ) {
+        LlmProviderAdapter provider = providerRegistry.resolve(providerName);
+        String actualProviderName = provider.providerName();
         String model = provider.defaultModel();
         SummaryCallObserver observer = new SummaryCallObserver(context.callObserver());
         try {
@@ -74,13 +106,69 @@ public final class ProviderSummaryGenerator implements SummaryGenerator {
             if (content.isBlank()) {
                 throw new IllegalStateException("summary provider returned blank content");
             }
-            writeAttempt(context, attemptId, providerName, model, "SUCCEEDED", result.finishReason(), result, null);
+            writeAttempt(context, attemptId, actualProviderName, model, "SUCCEEDED", result.finishReason(), result, null);
             return content;
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             if (observer.providerCallAccepted()) {
-                writeAttempt(context, attemptId, providerName, model, "FAILED", FinishReason.ERROR, null, errorJson(e));
+                writeAttempt(context, attemptId, actualProviderName, model, "FAILED", FinishReason.ERROR, null, errorJson(e));
             }
             throw e;
+        }
+    }
+
+    private String primaryProviderName(SummaryGenerationContext context) {
+        RunContext runContext = context.runContext();
+        if (runContext != null && runContext.primaryProvider() != null && !runContext.primaryProvider().isBlank()) {
+            return runContext.primaryProvider();
+        }
+        return properties.getLlm().getProvider();
+    }
+
+    private String fallbackProvider(SummaryGenerationContext context, RuntimeException failure) {
+        RunContext runContext = context.runContext();
+        if (runContext == null) {
+            return null;
+        }
+        return fallbackPolicy.selectFallbackProvider(runContext, failure).orElse(null);
+    }
+
+    private void writeFallbackEvent(
+            String runId,
+            String primaryAttemptId,
+            String fallbackAttemptId,
+            String primaryProvider,
+            String fallbackProvider,
+            RuntimeException primaryFailure
+    ) {
+        trajectoryStore.writeAgentEvent(
+                runId,
+                "llm_fallback",
+                fallbackEventJson(primaryAttemptId, fallbackAttemptId, primaryProvider, fallbackProvider, primaryFailure)
+        );
+    }
+
+    private String fallbackEventJson(
+            String primaryAttemptId,
+            String fallbackAttemptId,
+            String primaryProvider,
+            String fallbackProvider,
+            RuntimeException failure
+    ) {
+        try {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("primaryAttemptId", primaryAttemptId);
+            payload.put("fallbackAttemptId", fallbackAttemptId);
+            payload.put("primaryProvider", primaryProvider);
+            payload.put("fallbackProvider", fallbackProvider);
+            payload.put("errorType", failure instanceof ProviderCallException providerFailure
+                    ? providerFailure.type().name()
+                    : failure.getClass().getSimpleName());
+            if (failure instanceof ProviderCallException providerFailure && providerFailure.statusCode() != null) {
+                payload.put("statusCode", providerFailure.statusCode());
+            }
+            return objectMapper.writeValueAsString(payload);
+        } catch (JsonProcessingException e) {
+            return "{\"type\":\"llm_fallback\"}";
         }
     }
 

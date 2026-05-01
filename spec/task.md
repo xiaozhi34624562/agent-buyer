@@ -103,7 +103,7 @@ Path: /Users/xiaozhi/.codex/skills/java-alibaba-review/SKILL.md
 | V20-10 | 增加 `agent_context_compaction` 存储与查询 | 新增 V8 Flyway migration：创建 `agent_context_compaction` 表；记录 compaction strategy、before/after tokens、compactedMessageIds；trajectory query 可展示 compaction 记录 | DONE | V20-09 |
 | V20-11 | V2.0 集成测试与负向测试 | 覆盖 Qwen profile、RunContext provider 复用、fallback 安全边界、50K context compact、summary fields、pair validation、PAUSED 状态迁移、budget exceeded | DONE | V20-05,V20-10 |
 | V20-12 | V2.0 文档与配置收口 | README 标注 V2.0 状态；配置包含 provider、context、budget；Postman 或脚本补 provider/context smoke | DONE | V20-11 |
-| V20-GATE | V2.0 hardening review gate | `mvn test` 通过；V2.0 相关 review agent 无 P0/P1/P2；`progress.md` 记录 V2.0 完成摘要；允许开始 V2.1 | PENDING | V20-12 |
+| V20-GATE | V2.0 hardening review gate | `mvn test` 通过；V2.0 相关 review agent 无 P0/P1/P2；`progress.md` 记录 V2.0 完成摘要；允许开始 V2.1 | DONE | V20-12 |
 
 ## V2.1 任务：Skill + SubAgent
 

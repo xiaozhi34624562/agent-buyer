@@ -85,6 +85,7 @@ public final class AgentTurnOrchestrator {
                     contextView = contextViewBuilder.build(
                             runId,
                             turnNo,
+                            runContext,
                             () -> executionBudget.reserveMainLlmCall(turnBudget)
                     );
                 } catch (LlmCallBudgetExceededException e) {
@@ -93,6 +94,19 @@ public final class AgentTurnOrchestrator {
                         return stopped;
                     }
                     return pauseForBudgetExceeded(runId, e, sink);
+                } catch (Exception e) {
+                    stopped = stopIfNotRunning(runId);
+                    if (stopped != null) {
+                        return stopped;
+                    }
+                    String message = failureMessage(e);
+                    AgentRunResult terminal = transitionFromRunning(runId, RunStatus.FAILED, message, null);
+                    if (terminal.status() != RunStatus.FAILED) {
+                        return terminal;
+                    }
+                    sink.onError(new ErrorEvent(runId, message));
+                    log.error("context view build failed", e);
+                    return terminal;
                 }
                 List<LlmMessage> messages = contextView.messages();
                 log.info("llm attempt started turnNo={} messageCount={} model={}", turnNo, messages.size(), model);
@@ -253,5 +267,12 @@ public final class AgentTurnOrchestrator {
         RunStatus current = result.status();
         log.warn("agent terminal transition lost race targetStatus={} currentStatus={}", status, current);
         return new AgentRunResult(runId, current, null);
+    }
+
+    private String failureMessage(Exception failure) {
+        if (failure.getMessage() == null || failure.getMessage().isBlank()) {
+            return "agent turn failed";
+        }
+        return failure.getMessage();
     }
 }

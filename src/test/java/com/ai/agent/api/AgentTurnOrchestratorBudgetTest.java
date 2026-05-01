@@ -168,6 +168,48 @@ class AgentTurnOrchestratorBudgetTest {
         assertThat(trajectoryStore.events).extracting(EventRecord::eventType).containsExactly("MAIN_TURN_BUDGET");
     }
 
+    @Test
+    void contextBuildFailureTransitionsRunToFailedAndEmitsError() {
+        AgentProperties properties = new AgentProperties();
+        properties.getAgentLoop().setLlmCallBudgetPerUserTurn(30);
+        properties.getAgentLoop().setRunWideLlmCallBudget(80);
+        properties.getContext().setLargeResultThresholdTokens(Integer.MAX_VALUE);
+        properties.getContext().setMicroCompactThresholdTokens(Integer.MAX_VALUE);
+        properties.getContext().setSummaryCompactThresholdTokens(1);
+        properties.getContext().setRecentMessageBudgetTokens(1);
+        FakeTrajectoryStore trajectoryStore = new FakeTrajectoryStore();
+        trajectoryStore.statusByRun.put("run-1", RunStatus.RUNNING);
+        trajectoryStore.messagesByRun.put("run-1", List.of(
+                LlmMessage.system("s1", "system"),
+                LlmMessage.user("u1", "first"),
+                LlmMessage.assistant("a1", "second", List.of()),
+                LlmMessage.user("u2", "third"),
+                LlmMessage.user("u3", tokenText(20)),
+                LlmMessage.user("u4", "recent one"),
+                LlmMessage.assistant("a2", "recent two", List.of()),
+                LlmMessage.user("u5", "recent three")
+        ));
+        CountingProvider provider = new CountingProvider();
+        AgentTurnOrchestrator orchestrator = orchestrator(
+                properties,
+                trajectoryStore,
+                provider,
+                new InMemoryRunLlmCallBudgetStore(),
+                record -> null,
+                new ThrowingSummaryGenerator()
+        );
+        CapturingSink sink = new CapturingSink();
+
+        AgentRunResult result = orchestrator.runUntilStop("run-1", "user-1", runContext("run-1"), null, sink);
+
+        assertThat(result.status()).isEqualTo(RunStatus.FAILED);
+        assertThat(trajectoryStore.statusByRun.get("run-1")).isEqualTo(RunStatus.FAILED);
+        assertThat(provider.networkCalls).isZero();
+        assertThat(sink.errors).singleElement().satisfies(error ->
+                assertThat(error.message()).contains("summary exploded")
+        );
+    }
+
     private static AgentTurnOrchestrator orchestrator(
             AgentProperties properties,
             FakeTrajectoryStore trajectoryStore,
@@ -425,6 +467,7 @@ class AgentTurnOrchestratorBudgetTest {
 
     private static final class CapturingSink implements AgentEventSink {
         private final List<FinalEvent> finals = new ArrayList<>();
+        private final List<ErrorEvent> errors = new ArrayList<>();
 
         @Override
         public void onTextDelta(TextDeltaEvent event) {
@@ -449,6 +492,7 @@ class AgentTurnOrchestratorBudgetTest {
 
         @Override
         public void onError(ErrorEvent event) {
+            errors.add(event);
         }
     }
 
@@ -471,6 +515,13 @@ class AgentTurnOrchestratorBudgetTest {
                 values.add("\"" + id + "\"");
             }
             return "[" + String.join(",", values) + "]";
+        }
+    }
+
+    private static final class ThrowingSummaryGenerator implements SummaryGenerator {
+        @Override
+        public String generate(SummaryGenerationContext context, List<LlmMessage> messagesToCompact) {
+            throw new IllegalStateException("summary exploded");
         }
     }
 

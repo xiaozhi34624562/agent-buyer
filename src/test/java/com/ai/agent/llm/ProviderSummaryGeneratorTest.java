@@ -5,10 +5,12 @@ import com.ai.agent.domain.FinishReason;
 import com.ai.agent.domain.RunStatus;
 import com.ai.agent.tool.ToolCall;
 import com.ai.agent.tool.ToolTerminal;
+import com.ai.agent.trajectory.RunContext;
 import com.ai.agent.trajectory.TrajectoryStore;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -80,6 +82,39 @@ class ProviderSummaryGeneratorTest {
     }
 
     @Test
+    void retryablePrimarySummaryFailureFallsBackToRunContextFallbackProvider() {
+        FailingProviderAdapter deepseek = new FailingProviderAdapter(
+                "deepseek",
+                new ProviderCallException(ProviderErrorType.RETRYABLE_PRE_STREAM, "summary primary unavailable", 500)
+        );
+        FakeProviderAdapter qwen = new FakeProviderAdapter("qwen", """
+                {"summaryText":"fallback ok","businessFacts":[],"toolFacts":[],"openQuestions":[],"compactedMessageIds":["u1"]}
+                """.trim());
+        RecordingTrajectoryStore trajectoryStore = new RecordingTrajectoryStore();
+        ProviderSummaryGenerator generator = new ProviderSummaryGenerator(
+                new AgentProperties(),
+                new LlmProviderAdapterRegistry(List.of(deepseek, qwen)),
+                trajectoryStore,
+                new ObjectMapper()
+        );
+
+        String summary = generator.generate(
+                new SummaryGenerationContext("run-1", 4, runContext("run-1"), LlmCallObserver.NOOP),
+                List.of(LlmMessage.user("u1", "hello"))
+        );
+
+        assertThat(summary).contains("fallback ok");
+        assertThat(deepseek.lastRequest()).isNotNull();
+        assertThat(qwen.lastRequest()).isNotNull();
+        assertThat(trajectoryStore.attempts).extracting(AttemptRecord::provider)
+                .containsExactly("deepseek", "qwen");
+        assertThat(trajectoryStore.attempts).extracting(AttemptRecord::status)
+                .containsExactly("FAILED", "SUCCEEDED");
+        assertThat(trajectoryStore.events).extracting(EventRecord::eventType)
+                .containsExactly("llm_fallback");
+    }
+
+    @Test
     void rejectsProviderSummaryThatReturnsToolCalls() {
         FakeProviderAdapter provider = new FakeProviderAdapter(
                 "deepseek",
@@ -137,6 +172,38 @@ class ProviderSummaryGeneratorTest {
         }
     }
 
+    private static final class FailingProviderAdapter implements LlmProviderAdapter {
+        private final String providerName;
+        private final RuntimeException failure;
+        private final AtomicReference<LlmChatRequest> lastRequest = new AtomicReference<>();
+
+        private FailingProviderAdapter(String providerName, RuntimeException failure) {
+            this.providerName = providerName;
+            this.failure = failure;
+        }
+
+        @Override
+        public String providerName() {
+            return providerName;
+        }
+
+        @Override
+        public String defaultModel() {
+            return providerName + "-model";
+        }
+
+        @Override
+        public LlmStreamResult streamChat(LlmChatRequest request, LlmStreamListener listener) {
+            request.beforeProviderCall();
+            lastRequest.set(request);
+            throw failure;
+        }
+
+        private LlmChatRequest lastRequest() {
+            return lastRequest.get();
+        }
+    }
+
     private static final class CountingObserver implements LlmCallObserver {
         private int calls;
 
@@ -149,8 +216,12 @@ class ProviderSummaryGeneratorTest {
     private record AttemptRecord(String runId, int turnNo, String provider, String status) {
     }
 
+    private record EventRecord(String eventType, String payloadJson) {
+    }
+
     private static final class RecordingTrajectoryStore implements TrajectoryStore {
         private final List<AttemptRecord> attempts = new ArrayList<>();
+        private final List<EventRecord> events = new ArrayList<>();
 
         @Override
         public void createRun(String runId, String userId) {
@@ -207,6 +278,11 @@ class ProviderSummaryGeneratorTest {
         }
 
         @Override
+        public void writeAgentEvent(String runId, String eventType, String payloadJson) {
+            events.add(new EventRecord(eventType, payloadJson));
+        }
+
+        @Override
         public int currentTurn(String runId) {
             return 0;
         }
@@ -220,5 +296,19 @@ class ProviderSummaryGeneratorTest {
         public RunStatus findRunStatus(String runId) {
             return RunStatus.RUNNING;
         }
+    }
+
+    private static RunContext runContext(String runId) {
+        return new RunContext(
+                runId,
+                List.of(),
+                "deepseek-reasoner",
+                "deepseek",
+                "qwen",
+                "{}",
+                10,
+                LocalDateTime.now(),
+                LocalDateTime.now()
+        );
     }
 }

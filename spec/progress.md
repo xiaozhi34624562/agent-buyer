@@ -593,9 +593,39 @@ V2 必须按 `V2.0 -> V2.1 -> V2.2` 顺序推进，里程碑内部按 `task.md` 
 - re-review：两个 P2 均已修复，未发现新 P0/P1/P2。
 - 状态：DONE。
 
-### V20-GATE PENDING
+### V20-GATE DONE
 
 - 验收前置：V20-01..V20-12 全部 `DONE`；`MYSQL_PASSWORD=*** mvn test` 通过；`java-alibaba-review` 对本里程碑改动复审无 P0/P1/P2；本节追加 V2.0 完成摘要。
+
+启动记录：
+
+- 启动时间：2026-05-02 00:41 CST。
+- Gate 范围：复核 V20-01..V20-12 状态、运行全量 `mvn test`、触发 V2.0 里程碑 review agent、记录可进入 V2.1 的摘要。
+
+Review 修复记录：
+
+- 初次 gate 全量验证：`MYSQL_PASSWORD=*** mvn test`，150 tests，0 failures，0 errors，`BUILD SUCCESS`。
+- `java-alibaba-review` 发现 2 个 P1：
+  - `ProviderSummaryGenerator` 直接调用配置 provider，summary compaction 期间 DeepSeek retryable failure 不会走 RunContext fallback。
+  - `AgentTurnOrchestrator` 只捕获 context build 阶段的 budget 异常，summary provider failure / malformed summary / hard cap 等非预算异常会逃逸，可能让 run 停在 `RUNNING`。
+- TDD 红灯：
+  - `retryablePrimarySummaryFailureFallsBackToRunContextFallbackProvider` 先因 `SummaryGenerationContext` 不携带 RunContext 编译失败。
+  - `contextBuildFailureTransitionsRunToFailedAndEmitsError` 先暴露 context build failure 会逃逸。
+- 修复方式：
+  - `SummaryGenerationContext` 增加可选 `RunContext`；`AgentTurnOrchestrator -> ContextViewBuilder -> SummaryCompactor -> ProviderSummaryGenerator` 传递当前 run context。
+  - `ProviderSummaryGenerator` 复用 `ProviderFallbackPolicy`，primary summary attempt 只在 `RETRYABLE_PRE_STREAM` 且 fallback enabled 时切到 RunContext fallback provider，并写 `llm_fallback` event。
+  - `AgentTurnOrchestrator` 对 context build 非预算异常执行 `RUNNING -> FAILED`，向 SSE sink 发送 error，保留 budget 异常进入 `PAUSED` 的原语义。
+- targeted 绿灯：`mvn -Dtest=com.ai.agent.llm.ProviderSummaryGeneratorTest,com.ai.agent.api.AgentTurnOrchestratorBudgetTest test`，9 tests，0 failures，`BUILD SUCCESS`。
+- smoke 绿灯：`./scripts/v2-provider-context-smoke.sh`，36 tests，0 failures，`BUILD SUCCESS`。
+- full 绿灯：`MYSQL_PASSWORD=*** mvn test`，152 tests，0 failures，0 errors，`BUILD SUCCESS`。
+- re-review：`java-alibaba-review` 复审无 P0/P1/P2，确认 summary compaction 复用 RunContext fallback，context build 非预算异常进入 `FAILED`，budget exceeded 仍进入 `PAUSED`。
+- V2.0 完成摘要：
+  - DeepSeek + Qwen provider registry/profile/fallback 已完成；fallback 边界限制在 pre-stream retryable failure。
+  - RunContext provider/model/allowedTools 已持久化，continuation 复用，不被请求或配置默认值静默覆盖。
+  - LLM call budget 完成 MainAgent user turn 30 次、run-wide 80 次，超限 `PAUSED`。
+  - context compact 完成 large result spill、50K micro compact、summary compact 与 `agent_context_compaction` attribution。
+  - V2.0 文档、配置、smoke 脚本已同步。
+- 状态：DONE；允许启动 V2.1。
 
 ## V2.1 任务进度
 

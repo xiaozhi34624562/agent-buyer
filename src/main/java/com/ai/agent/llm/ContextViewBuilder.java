@@ -1,6 +1,7 @@
 package com.ai.agent.llm;
 
 import com.ai.agent.trajectory.ContextCompactionDraft;
+import com.ai.agent.trajectory.RunContext;
 import com.ai.agent.trajectory.TrajectoryReader;
 import org.springframework.stereotype.Component;
 
@@ -41,6 +42,15 @@ public final class ContextViewBuilder {
     }
 
     public ProviderContextView build(String runId, int turnNo, LlmCallObserver summaryCallObserver) {
+        return build(runId, turnNo, null, summaryCallObserver);
+    }
+
+    public ProviderContextView build(
+            String runId,
+            int turnNo,
+            RunContext runContext,
+            LlmCallObserver summaryCallObserver
+    ) {
         List<LlmMessage> rawMessages = trajectoryReader.loadMessages(runId);
         transcriptPairValidator.validate(rawMessages);
         List<ContextCompactionDraft> compactions = new ArrayList<>();
@@ -61,7 +71,7 @@ public final class ContextViewBuilder {
                 SUMMARY_COMPACT,
                 providerMessages,
                 summaryCompactor.compact(
-                        new SummaryGenerationContext(runId, turnNo, summaryCallObserver),
+                        new SummaryGenerationContext(runId, turnNo, runContext, summaryCallObserver),
                         providerMessages
                 ),
                 compactions
