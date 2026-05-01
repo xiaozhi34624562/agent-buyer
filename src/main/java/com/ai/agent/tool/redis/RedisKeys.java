@@ -43,6 +43,10 @@ public final class RedisKeys {
         return base(runId) + ":llm-call-budget";
     }
 
+    public String children(String runId) {
+        return base(runId) + ":children";
+    }
+
     private String base(String runId) {
         return properties.getRedisKeyPrefix() + ":{run:" + runId + "}";
     }

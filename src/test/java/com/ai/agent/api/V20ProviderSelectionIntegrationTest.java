@@ -164,6 +164,7 @@ class V20ProviderSelectionIntegrationTest {
                         objectMapper
                 ),
                 trajectoryStore,
+                trajectoryStore,
                 new RunStateMachine(trajectoryStore),
                 new AgentExecutionBudget(properties, new InMemoryRunLlmCallBudgetStore())
         );

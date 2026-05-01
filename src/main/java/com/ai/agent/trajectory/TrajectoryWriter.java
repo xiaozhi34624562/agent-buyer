@@ -11,6 +11,21 @@ import java.util.List;
 public interface TrajectoryWriter {
     void createRun(String runId, String userId);
 
+    default ChildRunCreation createChildRun(
+            String runId,
+            String userId,
+            String parentRunId,
+            String parentToolCallId,
+            String agentType,
+            String parentLinkStatus
+    ) {
+        throw new UnsupportedOperationException("child run creation is not implemented");
+    }
+
+    default void updateParentLinkStatus(String childRunId, String parentLinkStatus) {
+        throw new UnsupportedOperationException("parent link status update is not implemented");
+    }
+
     void updateRunStatus(String runId, RunStatus status, String error);
 
     boolean transitionRunStatus(String runId, RunStatus expected, RunStatus next, String error);

@@ -130,6 +130,25 @@ class RedisToolStoreIntegrationTest {
     }
 
     @Test
+    void longRunningToolUsesCallTimeoutAsLeaseFloor() {
+        String runId = Ids.newId("test_run");
+        try {
+            long beforeSchedule = System.currentTimeMillis();
+            ToolCall agentTool = call(runId, 1, "agent_tool", false, false, 185_000L);
+
+            assertThat(store.ingestWaiting(runId, agentTool)).isTrue();
+
+            StartedTool started = store.schedule(runId).getFirst();
+
+            assertThat(started.leaseUntil()).isGreaterThanOrEqualTo(beforeSchedule + 185_000L);
+            assertThat(store.reapExpiredLeases(runId, beforeSchedule + 90_001L)).isEmpty();
+            assertThat(store.terminal(runId, agentTool.toolCallId())).isEmpty();
+        } finally {
+            cleanup(runId);
+        }
+    }
+
+    @Test
     void expiredIdempotentLeaseIsRequeuedForRetry() {
         String runId = Ids.newId("test_run");
         try {
@@ -266,6 +285,17 @@ class RedisToolStoreIntegrationTest {
     }
 
     private ToolCall call(String runId, long seq, String toolName, boolean concurrent, boolean idempotent) {
+        return call(runId, seq, toolName, concurrent, idempotent, null);
+    }
+
+    private ToolCall call(
+            String runId,
+            long seq,
+            String toolName,
+            boolean concurrent,
+            boolean idempotent,
+            Long timeoutMs
+    ) {
         return new ToolCall(
                 runId,
                 Ids.newId("tc"),
@@ -277,7 +307,8 @@ class RedisToolStoreIntegrationTest {
                 concurrent,
                 idempotent,
                 false,
-                null
+                null,
+                timeoutMs
         );
     }
 

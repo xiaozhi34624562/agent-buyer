@@ -20,6 +20,7 @@ import com.ai.agent.persistence.mapper.AgentContextCompactionMapper;
 import com.ai.agent.persistence.mapper.AgentToolCallTraceMapper;
 import com.ai.agent.persistence.mapper.AgentToolProgressMapper;
 import com.ai.agent.persistence.mapper.AgentToolResultTraceMapper;
+import com.ai.agent.subagent.ParentLinkStatus;
 import com.ai.agent.tool.ToolCall;
 import com.ai.agent.tool.ToolTerminal;
 import com.ai.agent.util.Ids;
@@ -27,6 +28,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -80,7 +82,47 @@ public class MybatisTrajectoryStore implements TrajectoryStore, TrajectoryReader
         entity.setUserId(userId);
         entity.setStatus(RunStatus.CREATED.name());
         entity.setTurnNo(0);
+        entity.setAgentType("MAIN");
         runMapper.insert(entity);
+    }
+
+    @Override
+    public ChildRunCreation createChildRun(
+            String runId,
+            String userId,
+            String parentRunId,
+            String parentToolCallId,
+            String agentType,
+            String parentLinkStatus
+    ) {
+        AgentRunEntity existing = findExistingChildByParentToolCall(parentToolCallId);
+        if (existing != null) {
+            return new ChildRunCreation(existing.getRunId(), false);
+        }
+        AgentRunEntity entity = new AgentRunEntity();
+        entity.setRunId(runId);
+        entity.setUserId(userId);
+        entity.setStatus(RunStatus.CREATED.name());
+        entity.setTurnNo(0);
+        entity.setParentRunId(parentRunId);
+        entity.setParentToolCallId(parentToolCallId);
+        entity.setAgentType(canonicalChildAgentType(agentType));
+        entity.setParentLinkStatus(canonicalParentLinkStatus(parentLinkStatus));
+        try {
+            runMapper.insert(entity);
+            return new ChildRunCreation(runId, true);
+        } catch (DuplicateKeyException e) {
+            existing = findExistingChildByParentToolCall(parentToolCallId);
+            if (existing != null) {
+                return new ChildRunCreation(existing.getRunId(), false);
+            }
+            throw e;
+        }
+    }
+
+    @Override
+    public void updateParentLinkStatus(String childRunId, String parentLinkStatus) {
+        runMapper.updateParentLinkStatus(childRunId, canonicalParentLinkStatus(parentLinkStatus));
     }
 
     @Override
@@ -306,5 +348,30 @@ public class MybatisTrajectoryStore implements TrajectoryStore, TrajectoryReader
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("failed to read stored json", e);
         }
+    }
+
+    private AgentRunEntity findExistingChildByParentToolCall(String parentToolCallId) {
+        if (parentToolCallId == null || parentToolCallId.isBlank()) {
+            return null;
+        }
+        return runMapper.findByParentToolCallId(parentToolCallId);
+    }
+
+    private String canonicalChildAgentType(String agentType) {
+        if (agentType == null || agentType.isBlank()) {
+            throw new IllegalArgumentException("child agentType is required");
+        }
+        String canonical = agentType.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!"explore".equals(canonical)) {
+            throw new IllegalArgumentException("unknown child agentType: " + agentType);
+        }
+        return canonical;
+    }
+
+    private String canonicalParentLinkStatus(String parentLinkStatus) {
+        if (parentLinkStatus == null || parentLinkStatus.isBlank()) {
+            return ParentLinkStatus.LIVE.name();
+        }
+        return ParentLinkStatus.valueOf(parentLinkStatus.trim().toUpperCase(java.util.Locale.ROOT)).name();
     }
 }

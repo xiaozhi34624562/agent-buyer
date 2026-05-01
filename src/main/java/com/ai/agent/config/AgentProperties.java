@@ -20,6 +20,8 @@ public class AgentProperties {
     private RateLimit rateLimit = new RateLimit();
     private RequestPolicy requestPolicy = new RequestPolicy();
     private Context context = new Context();
+    private Skills skills = new Skills();
+    private SubAgent subAgent = new SubAgent();
 
     public String getRedisKeyPrefix() {
         return redisKeyPrefix;
@@ -123,6 +125,22 @@ public class AgentProperties {
 
     public void setContext(Context context) {
         this.context = context == null ? new Context() : context;
+    }
+
+    public Skills getSkills() {
+        return skills;
+    }
+
+    public void setSkills(Skills skills) {
+        this.skills = skills == null ? new Skills() : skills;
+    }
+
+    public SubAgent getSubAgent() {
+        return subAgent;
+    }
+
+    public void setSubAgent(SubAgent subAgent) {
+        this.subAgent = subAgent == null ? new SubAgent() : subAgent;
     }
 
     public static class AgentLoop {
@@ -527,6 +545,126 @@ public class AgentProperties {
 
         public void setSummaryMaxTokens(int summaryMaxTokens) {
             this.summaryMaxTokens = summaryMaxTokens;
+        }
+    }
+
+    public static class Skills {
+        private String rootPath = "classpath:skills";
+        private List<String> enabledSkillNames = List.of(
+                "purchase-guide",
+                "return-exchange-guide",
+                "order-issue-support"
+        );
+        private int maxPerMessage = 3;
+        private int maxTokenPerMessage = 8_000;
+
+        public String getRootPath() {
+            return rootPath;
+        }
+
+        public void setRootPath(String rootPath) {
+            this.rootPath = rootPath;
+        }
+
+        public List<String> getEnabledSkillNames() {
+            return enabledSkillNames;
+        }
+
+        public void setEnabledSkillNames(List<String> enabledSkillNames) {
+            this.enabledSkillNames = enabledSkillNames == null ? List.of() : List.copyOf(enabledSkillNames);
+        }
+
+        public int getMaxPerMessage() {
+            return maxPerMessage;
+        }
+
+        public void setMaxPerMessage(int maxPerMessage) {
+            this.maxPerMessage = maxPerMessage;
+        }
+
+        public int getMaxTokenPerMessage() {
+            return maxTokenPerMessage;
+        }
+
+        public void setMaxTokenPerMessage(int maxTokenPerMessage) {
+            this.maxTokenPerMessage = maxTokenPerMessage;
+        }
+    }
+
+    public static class SubAgent {
+        private int maxSpawnPerRun = 2;
+        private int maxConcurrentPerRun = 1;
+        private int spawnBudgetPerUserTurn = 2;
+        private long waitTimeoutMs = 180_000;
+        private int executorCorePoolSize = 2;
+        private int executorMaxPoolSize = 8;
+        private int executorQueueCapacity = 64;
+        private String spawnSystemPromptHint = """
+                Use AgentTool only when the task truly needs an independent child context. A single run can create at most 2 SubAgents; if the budget is exceeded, handle the task directly.
+                """;
+
+        public int getMaxSpawnPerRun() {
+            return maxSpawnPerRun;
+        }
+
+        public void setMaxSpawnPerRun(int maxSpawnPerRun) {
+            this.maxSpawnPerRun = maxSpawnPerRun;
+        }
+
+        public int getMaxConcurrentPerRun() {
+            return maxConcurrentPerRun;
+        }
+
+        public void setMaxConcurrentPerRun(int maxConcurrentPerRun) {
+            this.maxConcurrentPerRun = maxConcurrentPerRun;
+        }
+
+        public int getSpawnBudgetPerUserTurn() {
+            return spawnBudgetPerUserTurn;
+        }
+
+        public void setSpawnBudgetPerUserTurn(int spawnBudgetPerUserTurn) {
+            this.spawnBudgetPerUserTurn = spawnBudgetPerUserTurn;
+        }
+
+        public long getWaitTimeoutMs() {
+            return waitTimeoutMs;
+        }
+
+        public void setWaitTimeoutMs(long waitTimeoutMs) {
+            this.waitTimeoutMs = waitTimeoutMs;
+        }
+
+        public int getExecutorCorePoolSize() {
+            return executorCorePoolSize;
+        }
+
+        public void setExecutorCorePoolSize(int executorCorePoolSize) {
+            this.executorCorePoolSize = executorCorePoolSize;
+        }
+
+        public int getExecutorMaxPoolSize() {
+            return executorMaxPoolSize;
+        }
+
+        public void setExecutorMaxPoolSize(int executorMaxPoolSize) {
+            this.executorMaxPoolSize = executorMaxPoolSize;
+        }
+
+        public int getExecutorQueueCapacity() {
+            return executorQueueCapacity;
+        }
+
+        public void setExecutorQueueCapacity(int executorQueueCapacity) {
+            this.executorQueueCapacity = executorQueueCapacity;
+        }
+
+        public String getSpawnSystemPromptHint() {
+            return spawnSystemPromptHint;
+        }
+
+        public void setSpawnSystemPromptHint(String spawnSystemPromptHint) {
+            this.spawnSystemPromptHint = spawnSystemPromptHint;
         }
     }
 

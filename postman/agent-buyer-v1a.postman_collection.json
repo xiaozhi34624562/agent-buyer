@@ -562,7 +562,115 @@
       ]
     },
     {
-      "name": "11 Prometheus Metrics",
+      "name": "11 Create Run - Slash Skill",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "text/event-stream"
+          },
+          {
+            "key": "X-User-Id",
+            "value": "{{userId}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"/purchase-guide 帮我查询最近订单，并结合这个 skill 判断是否适合继续购买同类商品\"\n    }\n  ],\n  \"allowedToolNames\": [\"query_order\", \"skill_list\", \"skill_view\"],\n  \"llmParams\": {\n    \"model\": \"deepseek-reasoner\",\n    \"temperature\": 0.2,\n    \"maxTokens\": 4096\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/agent/runs",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "agent",
+            "runs"
+          ]
+        },
+        "description": "V2.1 验证：用户消息使用 /purchase-guide，服务端会把对应 SKILL.md transient 注入 provider view，不持久化为对外 user message。"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('slash skill request accepted', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.text();",
+              "pm.test('slash skill run returns final event', function () {",
+              "  pm.expect(body).to.include('event:final');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "12 Create Run - AgentTool ExploreAgent",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "text/event-stream"
+          },
+          {
+            "key": "X-User-Id",
+            "value": "{{userId}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"如果需要独立梳理订单情况，可以使用 ExploreAgent 调查最近订单，再把结果总结给我\"\n    }\n  ],\n  \"allowedToolNames\": [\"query_order\", \"skill_list\", \"skill_view\", \"agent_tool\"],\n  \"llmParams\": {\n    \"model\": \"deepseek-reasoner\",\n    \"temperature\": 0.2,\n    \"maxTokens\": 4096\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/agent/runs",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "agent",
+            "runs"
+          ]
+        },
+        "description": "V2.1 验证：agent_tool 可同步创建 ExploreAgent child run。模型是否调用取决于真实 provider 输出；trajectory 中可查询 child run parent link。"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('agent tool scenario accepted', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.text();",
+              "pm.test('agent tool scenario returns final event', function () {",
+              "  pm.expect(body).to.include('event:final');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "13 Prometheus Metrics",
       "request": {
         "method": "GET",
         "header": [],

@@ -18,6 +18,9 @@ import com.ai.agent.llm.SummaryGenerator;
 import com.ai.agent.llm.SummaryCompactor;
 import com.ai.agent.llm.TokenEstimator;
 import com.ai.agent.llm.TranscriptPairValidator;
+import com.ai.agent.skill.SkillCommandResolver;
+import com.ai.agent.skill.SkillPathResolver;
+import com.ai.agent.skill.SkillRegistry;
 import com.ai.agent.tool.CancelReason;
 import com.ai.agent.tool.StartedTool;
 import com.ai.agent.tool.ToolCall;
@@ -34,7 +37,11 @@ import com.ai.agent.trajectory.TrajectoryReader;
 import com.ai.agent.trajectory.TrajectoryStore;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -46,6 +53,9 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class AgentTurnOrchestratorBudgetTest {
+    @TempDir
+    Path skillsRoot;
+
     @Test
     void pausesRunAndWritesEventWhenMainTurnBudgetIsExceededBeforeProviderCall() {
         AgentProperties properties = new AgentProperties();
@@ -92,6 +102,64 @@ class AgentTurnOrchestratorBudgetTest {
         assertThat(provider.networkCalls).isZero();
         assertThat(budgetStore.countsByRun.get("run-1")).isEqualTo(1L);
     }
+
+    @Test
+    void pausesSubAgentRunAndWritesSubTurnBudgetEvent() {
+        AgentProperties properties = new AgentProperties();
+        properties.getAgentLoop().setSubAgentLlmCallBudgetPerUserTurn(0);
+        properties.getAgentLoop().setRunWideLlmCallBudget(80);
+        FakeTrajectoryStore trajectoryStore = new FakeTrajectoryStore();
+        trajectoryStore.statusByRun.put("child-run-1", RunStatus.RUNNING);
+        trajectoryStore.messagesByRun.put("child-run-1", List.of(
+                LlmMessage.user("msg-1", "hello"),
+                LlmMessage.assistant("msg-2", "已找到一个疑似目标订单 O-1001。", List.of())
+        ));
+        CountingProvider provider = new CountingProvider();
+        AgentTurnOrchestrator orchestrator = orchestrator(properties, trajectoryStore, provider, new InMemoryRunLlmCallBudgetStore());
+
+        AgentRunResult result = orchestrator.runSubAgentUntilStop(
+                "child-run-1",
+                "user-1",
+                runContext("child-run-1"),
+                null,
+                new CapturingSink()
+        );
+
+        assertThat(result.status()).isEqualTo(RunStatus.PAUSED);
+        assertThat(result.finalText()).contains("疑似目标订单 O-1001");
+        assertThat(trajectoryStore.events).extracting(EventRecord::eventType).containsExactly("SUB_TURN_BUDGET");
+        assertThat(provider.networkCalls).isZero();
+    }
+
+    @Test
+    void subAgentRunWideBudgetUsesParentRunBudgetKey() {
+        AgentProperties properties = new AgentProperties();
+        properties.getAgentLoop().setSubAgentLlmCallBudgetPerUserTurn(30);
+        properties.getAgentLoop().setRunWideLlmCallBudget(1);
+        FakeTrajectoryStore trajectoryStore = new FakeTrajectoryStore();
+        trajectoryStore.statusByRun.put("child-run-1", RunStatus.RUNNING);
+        trajectoryStore.messagesByRun.put("child-run-1", List.of(LlmMessage.user("msg-1", "hello")));
+        InMemoryRunLlmCallBudgetStore budgetStore = new InMemoryRunLlmCallBudgetStore();
+        budgetStore.countsByRun.put("parent-run-1", 1L);
+        CountingProvider provider = new CountingProvider();
+        AgentTurnOrchestrator orchestrator = orchestrator(properties, trajectoryStore, provider, budgetStore);
+
+        AgentRunResult result = orchestrator.runSubAgentUntilStop(
+                "child-run-1",
+                "parent-run-1",
+                "user-1",
+                runContext("child-run-1"),
+                null,
+                new CapturingSink()
+        );
+
+        assertThat(result.status()).isEqualTo(RunStatus.PAUSED);
+        assertThat(trajectoryStore.events).extracting(EventRecord::eventType).containsExactly("RUN_WIDE_BUDGET");
+        assertThat(provider.networkCalls).isZero();
+        assertThat(budgetStore.countsByRun).containsEntry("parent-run-1", 1L);
+        assertThat(budgetStore.countsByRun).doesNotContainKey("child-run-1");
+    }
+
 
     @Test
     void budgetExceededDoesNotPersistCompactionForUnattemptedProviderCall() {
@@ -210,6 +278,69 @@ class AgentTurnOrchestratorBudgetTest {
         );
     }
 
+    @Test
+    void slashSkillBudgetFailureEmitsStableErrorContract() throws IOException {
+        writeSkill("purchase-guide", "买货指南", "purchase");
+        writeSkill("return-exchange-guide", "退换货指南", "return");
+        AgentProperties properties = new AgentProperties();
+        properties.getSkills().setEnabledSkillNames(List.of("purchase-guide", "return-exchange-guide"));
+        properties.getSkills().setMaxPerMessage(1);
+        properties.getAgentLoop().setLlmCallBudgetPerUserTurn(30);
+        properties.getAgentLoop().setRunWideLlmCallBudget(80);
+        FakeTrajectoryStore trajectoryStore = new FakeTrajectoryStore();
+        trajectoryStore.statusByRun.put("run-1", RunStatus.RUNNING);
+        trajectoryStore.messagesByRun.put("run-1", List.of(
+                LlmMessage.user("u1", "请使用 /purchase-guide /return-exchange-guide")
+        ));
+        ObjectMapper objectMapper = new ObjectMapper();
+        ContextViewBuilder contextViewBuilder = new ContextViewBuilder(
+                trajectoryStore,
+                new TranscriptPairValidator(),
+                new LargeResultSpiller(properties, new TokenEstimator()),
+                new MicroCompactor(properties, new TokenEstimator()),
+                new SummaryCompactor(
+                        properties,
+                        new TokenEstimator(),
+                        new DeterministicSummaryGenerator(objectMapper),
+                        objectMapper
+                ),
+                new SkillCommandResolver(
+                        properties,
+                        new SkillRegistry(skillsRoot, List.of("purchase-guide", "return-exchange-guide")),
+                        new SkillPathResolver(skillsRoot),
+                        objectMapper
+                ),
+                trajectoryStore,
+                objectMapper
+        );
+        CountingProvider provider = new CountingProvider();
+        AgentTurnOrchestrator orchestrator = orchestrator(
+                properties,
+                trajectoryStore,
+                provider,
+                new InMemoryRunLlmCallBudgetStore(),
+                record -> null,
+                contextViewBuilder,
+                objectMapper
+        );
+        CapturingSink sink = new CapturingSink();
+
+        AgentRunResult result = orchestrator.runUntilStop("run-1", "user-1", runContext("run-1"), null, sink);
+
+        assertThat(result.status()).isEqualTo(RunStatus.FAILED);
+        assertThat(provider.networkCalls).isZero();
+        assertThat(sink.errors).singleElement().satisfies(error -> {
+            assertThat(error.code()).isEqualTo("SKILL_BUDGET_EXCEEDED");
+            assertThat(error.details())
+                    .containsEntry("budget", 1)
+                    .containsEntry("actual", 2)
+                    .containsEntry("exceeded", 1);
+            assertThat(error.details().get("matchedSkills").toString())
+                    .contains("purchase-guide")
+                    .contains("return-exchange-guide");
+        });
+    }
+
     private static AgentTurnOrchestrator orchestrator(
             AgentProperties properties,
             FakeTrajectoryStore trajectoryStore,
@@ -245,20 +376,41 @@ class AgentTurnOrchestratorBudgetTest {
             SummaryGenerator summaryGenerator
     ) {
         ObjectMapper objectMapper = new ObjectMapper();
+        ContextViewBuilder contextViewBuilder = new ContextViewBuilder(
+                trajectoryStore,
+                new TranscriptPairValidator(),
+                new LargeResultSpiller(properties, new TokenEstimator()),
+                new MicroCompactor(properties, new TokenEstimator()),
+                new SummaryCompactor(
+                        properties,
+                        new TokenEstimator(),
+                        summaryGenerator,
+                        objectMapper
+                )
+        );
+        return orchestrator(
+                properties,
+                trajectoryStore,
+                provider,
+                budgetStore,
+                compactionStore,
+                contextViewBuilder,
+                objectMapper
+        );
+    }
+
+    private static AgentTurnOrchestrator orchestrator(
+            AgentProperties properties,
+            FakeTrajectoryStore trajectoryStore,
+            LlmProviderAdapter provider,
+            RunLlmCallBudgetStore budgetStore,
+            ContextCompactionStore compactionStore,
+            ContextViewBuilder contextViewBuilder,
+            ObjectMapper objectMapper
+    ) {
         return new AgentTurnOrchestrator(
                 properties,
-                new ContextViewBuilder(
-                        trajectoryStore,
-                        new TranscriptPairValidator(),
-                        new LargeResultSpiller(properties, new TokenEstimator()),
-                        new MicroCompactor(properties, new TokenEstimator()),
-                        new SummaryCompactor(
-                                properties,
-                                new TokenEstimator(),
-                                summaryGenerator,
-                                objectMapper
-                        )
-                ),
+                contextViewBuilder,
                 new LlmAttemptService(
                         new LlmProviderAdapterRegistry(List.of(provider)),
                         trajectoryStore,
@@ -278,9 +430,24 @@ class AgentTurnOrchestratorBudgetTest {
                         objectMapper
                 ),
                 trajectoryStore,
+                trajectoryStore,
                 new RunStateMachine(trajectoryStore),
                 new AgentExecutionBudget(properties, budgetStore)
         );
+    }
+
+    private void writeSkill(String name, String description, String body) throws IOException {
+        Path skillDir = Files.createDirectories(skillsRoot.resolve(name));
+        Files.writeString(skillDir.resolve("SKILL.md"), """
+                ---
+                name: %s
+                description: %s
+                ---
+
+                # %s
+
+                %s
+                """.formatted(name, description, name, body));
     }
 
     private static RunContext runContext(String runId) {

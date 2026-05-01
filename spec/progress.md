@@ -631,14 +631,14 @@ Review 修复记录：
 
 V2.1 必须在 `V20-GATE` 完成后启动。下列条目仅作为占位，待 V2.0 收口后再补每个任务的写入范围与关注点。
 
-- `V21-01` PENDING — SkillRegistry / Anthropic skill 扫描。
-- `V21-02` PENDING — SkillPathResolver 路径安全。
-- `V21-03` PENDING — SkillListTool / SkillViewTool。
-- `V21-03a` PENDING — PromptAssembler 注入 skill preview。
-- `V21-04` PENDING — SkillCommandResolver slash 注入。
-- `V21-05` PENDING — slash skill budget fail closed。
-- `V21-06` PENDING — AgentTool schema + 反滥用提示。
-- `V21-07` PENDING — child run MySQL 字段 + Flyway V9。
+- `V21-01` DONE — SkillRegistry / Anthropic skill 扫描。
+- `V21-02` DONE — SkillPathResolver 路径安全。
+- `V21-03` DONE — SkillListTool / SkillViewTool。
+- `V21-03a` DONE — PromptAssembler 注入 skill preview。
+- `V21-04` DONE — SkillCommandResolver slash 注入。
+- `V21-05` DONE — slash skill budget fail closed。
+- `V21-06` DONE — AgentTool schema + 反滥用提示。
+- `V21-07` IN_PROGRESS — child run MySQL 字段 + Flyway V9。
 - `V21-08` PENDING — SubAgentRegistry / SubAgentProfile。
 - `V21-09` PENDING — SubAgentBudgetPolicy + ChildRunRegistry + reserve_child.lua。
 - `V21-10` PENDING — release_child.lua + child lifecycle。
@@ -648,6 +648,151 @@ V2.1 必须在 `V20-GATE` 完成后启动。下列条目仅作为占位，待 V2
 - `V21-14` PENDING — V2.1 集成 / 负向测试。
 - `V21-15` PENDING — V2.1 文档收口。
 - `V21-GATE` PENDING — V2.1 hardening review gate。
+
+### V21-01 启动记录
+
+- 启动时间：2026-05-02 00:55 CST。
+- 写入范围：`src/main/java/com/ai/agent/skill/**`、`src/test/java/com/ai/agent/skill/**`、`skills/**`。
+- 分工：sub agent 负责 `SkillRegistry`、Anthropic-style `SKILL.md` frontmatter 扫描、3 个业务 skill 文件和路径解析基础测试；主 agent 负责状态维护、集成、review gate 与后续 tool/prompt 接线。
+- TDD 目标：先覆盖 3 个业务 skill 可索引、preview 只包含 `name + description`、缺失/非法 frontmatter 的稳定处理，再实现 registry。
+- 设计约束：preview 不能读取或暴露完整 `SKILL.md`；`skillPath` 安全规则归入 V21-02，同一 worker 连续完成但主 agent 按任务边界验收。
+
+### V21-01 / V21-02 Review 修复记录
+
+- sub agent 完成初版后，限定测试 `mvn -Dtest=com.ai.agent.skill.SkillRegistryTest,com.ai.agent.skill.SkillPathResolverTest test` 通过 8 tests。
+- 第一轮 `java-alibaba-review` 发现 2 个 P2：
+  - `SkillRegistry` 扫描 preview 时会跟随 symlink skill directory / `SKILL.md`，registry 与 resolver 的安全边界不一致。
+  - `SkillPathResolver` 的 `skillName` 可接受 `purchase-guide/references` 这类多段路径，破坏 `skills/*/SKILL.md` 单段 skill id 不变量。
+- TDD 修复：
+  - 先补 symlink directory、symlink `SKILL.md`、nested skillName、非法 skillName 红测，随后修复 registry/resolver。
+  - `SkillRegistry` 改为解析 real root、拒绝 symlink skill directory 与 symlink/non-regular `SKILL.md`，并要求 frontmatter `name` 匹配目录名。
+  - `SkillPathResolver` 增加单段 skillName 校验，允许格式 `[a-z0-9][a-z0-9-]*`。
+- 第二轮 review 继续发现 P2：malformed `skillPath`（例如 NUL）会从 `Path.of` 抛出 JDK `InvalidPathException`，绕过稳定错误码。
+- TDD 修复：新增 malformed path 红测，`requestedPath` 捕获 `InvalidPathException` 并映射为 `PATH_ESCAPE`。
+- 当前 targeted：`mvn -Dtest=com.ai.agent.skill.SkillRegistryTest,com.ai.agent.skill.SkillPathResolverTest test`，13 tests，0 failures，0 errors，`BUILD SUCCESS`。
+- 终轮 `java-alibaba-review` 复审：未发现 P0/P1/P2；V21-01 / V21-02 状态置为 `DONE`。
+
+### V21-03 启动记录
+
+- 启动时间：2026-05-02 01:02 CST。
+- 写入范围：`src/main/java/com/ai/agent/skill/**`、`src/main/java/com/ai/agent/tool/**` 中新增 skill tools、`src/main/java/com/ai/agent/config/AgentProperties.java` 的 skill 配置、`application.yml` 默认工具/skill 配置、对应测试。
+- 工程判断：`skill_list` / `skill_view` 必须是普通 Tool，由 `ToolRegistry` 自动注册；`skill_list` schema 不暴露 `userId`，运行时从 `ToolUseContext` 取当前用户。
+- 额外边界：项目根 `skills/` 里已有开发辅助 `java-alibaba-review`，业务 agent 默认只暴露 `purchase-guide`、`return-exchange-guide`、`order-issue-support` 三个 skill，避免业务模型误用开发 review skill。
+
+### V21-03 / V21-03a / V21-04 / V21-05 实现记录
+
+- `SkillListTool` / `SkillViewTool` 作为普通 Spring `Tool` 注册，继承 `AbstractTool`，沿用 validate、输出大小限制、PII policy。
+- `skill_list` schema 不包含 `userId`，执行时从 `ToolExecutionContext.userId` 注入，并返回当前可见 skill preview。
+- `skill_view` 通过 `SkillRegistry.contains` 限制只能读取 enabled skill，再交给 `SkillPathResolver` 读取 `SKILL.md` 或 skill 内相对路径；路径错误映射为 tool failure。
+- `AgentProperties.skills` 增加 `rootPath`、`enabledSkillNames`、`maxPerMessage=3`、`maxTokenPerMessage=8000`；`application.yml` 默认只启用三个业务 skill，并把 `skill_list` / `skill_view` 加入应用默认工具集。
+- `PromptAssembler` 注入 skill preview，位置在 user profile 之后、tool schema snapshot 之前；preview 仅 `name + description`，不含完整 `SKILL.md`。
+- `SkillCommandResolver` 解析最新 user message 中的 `/skillName`，按需把完整 `SKILL.md` 作为 transient provider message 注入；不追加 MySQL `agent_message`。
+- `ContextViewBuilder` 在 raw transcript pair validation 后执行 slash skill 注入，再进入 large spill / micro compact / summary compact；注入成功写 `agent_event: skill_slash_injected`。
+- slash skill budget fail closed：单条消息超过 3 个 skill 或加载后超过 8000 token 时抛 `SKILL_BUDGET_EXCEEDED`，错误体包含 `matchedSkills`、`budget`、`actual`、`exceeded`。
+- review P2 修复：默认 skill root 改为 `${AGENT_SKILLS_ROOT:classpath:skills}`，内置 3 个业务 skill 复制到 `src/main/resources/skills`；`AppConfig` 支持 classpath materialize 到临时目录，也保留外部绝对路径配置。
+- 补充 disabled slash skill 测试，确认未启用 skill 不会被 slash 注入，也不会通过 `skill_view` 泄露正文。
+- TDD 红灯：
+  - `SkillToolsTest` 先因缺少 `SkillListTool` / `SkillViewTool` 编译失败，再实现工具。
+  - `PromptAssemblerSkillPreviewTest` 先因构造器不支持 `SkillRegistry` 编译失败，再实现 preview 注入。
+  - `SkillCommandResolverTest` / `ContextViewBuilderTest` 先暴露 slash 注入、budget、transient view、event 写入缺口，再接入 resolver。
+- targeted：`mvn -Dtest=com.ai.agent.config.AppConfigSkillResourceTest,com.ai.agent.skill.SkillRegistryTest,com.ai.agent.skill.SkillPathResolverTest,com.ai.agent.skill.SkillToolsTest,com.ai.agent.skill.SkillCommandResolverTest,com.ai.agent.llm.PromptAssemblerSkillPreviewTest,com.ai.agent.llm.ContextViewBuilderTest test`，33 tests，0 failures，0 errors，`BUILD SUCCESS`。
+- `java-alibaba-review` 复审：无 P0/P1/P2；V21-03 / V21-03a / V21-04 / V21-05 状态置为 `DONE`。
+- 踩坑记录：`Map.copyOf` 不保证保留 `LinkedHashMap` 插入顺序，导致 preview 顺序测试抖动；修复为 `Collections.unmodifiableMap(new LinkedHashMap)` 风格保序。
+
+### V21-06 启动记录
+
+- 启动时间：2026-05-02 01:14 CST。
+- 写入范围：新增 `AgentTool` schema、SubAgent 输入 DTO 占位、MainAgent prompt 反滥用提示、默认工具配置与测试。
+- 工程判断：`AgentTool` 必须先作为普通 Tool 暴露给模型，但在 V21-06 不真正启动 child run；真实 reserve / runner / persistence 在 V21-07..V21-13 顺序落地。
+- 验收关注点：tool schema description 明确“高成本、谨慎使用、单 run 上限”，MainAgent system prompt 有同样 hint，`agent_tool` 被默认授权但不会绕过后续 SubAgentBudgetPolicy。
+
+实现记录：
+
+- 新增 `AgentTool`，作为普通 `Tool` 注册，schema 参数包含 `agentType=explore`、`task`、可选 `systemPrompt`。
+- `AgentTool.schema().description` 明确 high-cost、同步 child run、single run limit；工具为 non-concurrent / non-idempotent。
+- MainAgent default system prompt 增加反滥用提示：仅真正需要独立 child context 时使用，单 run 最多 2 个 SubAgent，超限后直接处理。
+- `application.yml` 将 `agent_tool` 加入默认工具集。
+- V21-06 暂不创建 child run，`run` 返回 `subagent_not_ready`；真实 reserve/runner 在 V21-09..V21-11 接入，避免提前绕过预算策略。
+- targeted：`mvn -Dtest=com.ai.agent.tool.AgentToolTest,com.ai.agent.llm.PromptAssemblerSkillPreviewTest test`，4 tests，0 failures，0 errors，`BUILD SUCCESS`。
+- 状态：DONE。
+
+### V21-07 启动记录
+
+- 启动时间：2026-05-02 01:16 CST。
+- 写入范围：Flyway `V9__child_run_link.sql`、`AgentRunEntity`、`AgentRunMapper`、`TrajectoryWriter/MybatisTrajectoryStore` child run API、`RunDto/TrajectoryQueryService` DTO 映射、对应 integration/unit tests。
+- 工程判断：parent/child 关系属于 run 轨迹真相，放在 MySQL `agent_run`，不放 `RunContextStore`；child 的能力继承后续仍通过 `RunContext.effectiveAllowedTools` 表达。
+
+实现与 review 修复记录：
+
+- 新增 V9 child run link 字段：`parent_run_id`、`parent_tool_call_id`、`agent_type`、`parent_link_status`，trajectory query DTO 暴露 parent link 信息。
+- `TrajectoryWriter.createChildRun` 改为返回实际 childRunId；同一个 `parent_tool_call_id` 重试时复用已有 child run。
+- 追加 V9.1 migration，为 `parent_tool_call_id` 增加 nullable unique key，避免一个 AgentTool parent call 产生多个 child run。
+- review P2 修复：
+  - `findLiveChildren` 增加 `parent_link_status='LIVE'` 过滤，避免 detached child 被当作 live。
+  - child `agent_type` 入库前 canonicalize 为 registry 可解析的小写类型，例如 `explore`。
+  - `AgentTool` 增加 runtime fail-closed 测试，runner 未接入前返回 `subagent_not_ready` FAILED terminal。
+- targeted：`MYSQL_PASSWORD=*** mvn -Dtest=com.ai.agent.subagent.SubAgentRegistryTest,com.ai.agent.tool.AgentToolTest,com.ai.agent.trajectory.TrajectoryQueryServiceTest,com.ai.agent.TrajectoryStoreIntegrationTest,com.ai.agent.subagent.RedisChildRunRegistryIntegrationTest test`，14 tests，0 failures，0 errors，`BUILD SUCCESS`。
+
+### V21-08 / V21-09 / V21-10 实现记录
+
+- `ExploreAgentProfile` 作为首个 SubAgent profile，继承 parent 的 tool/skill 能力交集：`query_order`、`skill_list`、`skill_view`，显式排除写工具和 `agent_tool`，不继承 parent history。
+- `SubAgentRegistry` 按 `agentType` 注册 profile，拒绝重复 profile 与未知 agent type。
+- 新增 `SubAgentBudgetPolicy`、`ChildRunRegistry`、`RedisChildRunRegistry` 和 child lifecycle records/enums。
+- Redis key 使用 `agent:{run:<parentRunId>}:children`，通过 hash tag 保证同 run child 状态在 Redis Cluster 同 slot。
+- `reserve_child.lua` 在单个 Lua 原子操作内检查：
+  - `max-spawn-per-run=2`
+  - `max-concurrent-per-run=1`
+  - `spawn-budget-per-user-turn=2`
+  失败统一返回 `SUBAGENT_BUDGET_EXCEEDED` 和具体 reason。
+- `release_child.lua` 只释放 `in_flight` 计数，不回退 lifetime `spawned_total`，并记录 release reason 与 parent link status。
+- targeted：`MYSQL_PASSWORD=*** mvn -Dtest=com.ai.agent.subagent.RedisChildRunRegistryIntegrationTest test`，4 tests，0 failures，0 errors，`BUILD SUCCESS`。
+- 踩坑记录：SpringBootTest 即使只测 Redis，也会初始化 Flyway/MySQL；本地运行必须带 `MYSQL_PASSWORD=***`，否则 Hikari 会反复尝试空密码连接导致测试慢失败。
+
+复审修复：
+
+- Redis reserve 增加 `tool_call:<parentToolCallId>` 映射，同一个 parent tool call 重试时返回已有 childRunId，不重复消耗 spawn / concurrent budget。
+- `release_child.lua` 改为只有 `IN_FLIGHT` 才释放并写终态；已 `RELEASED` 的 child 再次 release 返回 false，不覆盖真实终态。
+- `MybatisTrajectoryStore.createChildRun` 对 child `agentType` 做 supported type 校验；未知类型不落库。
+- targeted：`MYSQL_PASSWORD=*** mvn -Dtest=com.ai.agent.TrajectoryStoreIntegrationTest,com.ai.agent.subagent.RedisChildRunRegistryIntegrationTest,com.ai.agent.tool.AgentToolTest test`，15 tests，0 failures，0 errors，`BUILD SUCCESS`。
+
+### V21-11 / V21-12 / V21-13 实现记录
+
+- `AgentTool` 通过 `ObjectProvider<SubAgentRunner>` lazy 接入 runner，避免 `ToolRegistry -> AgentTool -> SubAgentRunner -> AgentTurnOrchestrator -> ToolCallCoordinator -> ToolRegistry` 的启动期循环依赖。
+- runner 缺失时仍 fail closed，返回 `subagent_not_ready`；runner 存在时返回 `childRunId`、`status`、`summary`、`partial`。
+- `DefaultSubAgentRunner`：
+  - 从 parent `RunContext` 继承 provider/model/allowed tool 集合。
+  - 通过 `ExploreAgentProfile` 收窄 child tools，只保留 `query_order`、`skill_list`、`skill_view`。
+  - 新建 child run、child RunContext、system message 与 delegated user message，不复制 parent history。
+  - 将 child run 从 `CREATED` 推进到 `RUNNING` 后调用 `AgentTurnOrchestrator.runSubAgentUntilStop`。
+  - 默认等待 `agent.sub-agent.wait-timeout-ms=180000`；超时写 child `TIMEOUT` 与 `DETACHED_BY_TIMEOUT`，parent 只拿 partial summary。
+- `AgentExecutionBudget` 增加 `SUB_TURN_BUDGET`，SubAgent user turn 使用 `sub-agent-llm-call-budget-per-user-turn=30`，run-wide 预算仍共享 Redis counter。
+- `AgentTurnOrchestrator` 增加 `runSubAgentUntilStop`，复用 agent loop 主体，但预算事件从 `MAIN_TURN_BUDGET` 切换为 `SUB_TURN_BUDGET`。
+- README / Postman 已增加 `/purchase-guide` slash skill 示例、SubAgent 同步等待限制和 child trajectory 查询说明。
+- targeted：`MYSQL_PASSWORD=*** mvn -Dtest=com.ai.agent.skill.SkillRegistryTest,com.ai.agent.skill.SkillPathResolverTest,com.ai.agent.skill.SkillToolsTest,com.ai.agent.skill.SkillCommandResolverTest,com.ai.agent.llm.PromptAssemblerSkillPreviewTest,com.ai.agent.llm.ContextViewBuilderTest,com.ai.agent.config.AppConfigSkillResourceTest,com.ai.agent.subagent.SubAgentRegistryTest,com.ai.agent.subagent.RedisChildRunRegistryIntegrationTest,com.ai.agent.subagent.DefaultSubAgentRunnerTest,com.ai.agent.tool.AgentToolTest,com.ai.agent.api.AgentExecutionBudgetTest,com.ai.agent.api.AgentTurnOrchestratorBudgetTest,com.ai.agent.trajectory.TrajectoryQueryServiceTest,com.ai.agent.TrajectoryStoreIntegrationTest test`，63 tests，0 failures，0 errors，`BUILD SUCCESS`。
+
+### V21 hardening review 修复与 gate 收口
+
+- 时间：2026-05-02 02:18 CST。
+- 第一轮 `java-alibaba-review` 发现 1 个 P1 与 3 个 P2：
+  - slash skill budget error 被 generic context build failure 吞掉，缺少 `SKILL_BUDGET_EXCEEDED` 稳定 code/details。
+  - SubAgent `spawn-budget-per-user-turn` 使用 `agent_run.turn_no`，语义实际是 LLM turn，不是用户 turn。
+  - child run 已创建后如果执行异常，parent tool result 变成 generic `tool_execution_failed`，丢失 `childRunId/status/summary`。
+  - README 在 `V21-GATE` 之前提前标注 V2.1 已完成。
+- 修复：
+  - `ErrorEvent` 增加 `code` 与 `details`；`SkillCommandException` 携带结构化 details；`AgentTurnOrchestrator` 对 `SkillCommandException` 独立处理，SSE error 输出 `SKILL_BUDGET_EXCEEDED`、`matchedSkills`、`budget`、`actual`、`exceeded`。
+  - `ReserveChildCommand` / `ChildRunRef` 将 `turnNo` 改为 `userTurnNo`；`DefaultSubAgentRunner` 从 parent trajectory 的 USER message 数量计算稳定用户轮次，避免同一用户 turn 内多次 LLM/tool loop 绕过预算。
+  - `DefaultSubAgentRunner` 在 child future `ExecutionException` 后标记 child failed、release slot，并返回 failed `SubAgentResult(childRunId, status, summary, partial=true)`，让 `AgentTool` 能保留 parent-child link。
+  - README 先改为 `hardening gate 中`，V21-GATE 复审通过后再改回 `已完成`。
+- 新增/补强测试：
+  - slash skill budget 经 orchestrator 输出稳定 error contract。
+  - `currentTurn=9` 但 parent 有 2 条 user message 时，reserve 使用 `userTurnNo=2`。
+  - child execution failure 返回包含 `childRunId` 的 failed SubAgent result。
+- 验证：
+  - `mvn -Dtest=com.ai.agent.api.AgentTurnOrchestratorBudgetTest,com.ai.agent.subagent.DefaultSubAgentRunnerTest test`：18 tests，0 failures，0 errors。
+  - `MYSQL_PASSWORD=*** mvn -Dtest=com.ai.agent.skill.SkillRegistryTest,com.ai.agent.skill.SkillPathResolverTest,com.ai.agent.skill.SkillToolsTest,com.ai.agent.skill.SkillCommandResolverTest,com.ai.agent.llm.PromptAssemblerSkillPreviewTest,com.ai.agent.llm.ContextViewBuilderTest,com.ai.agent.config.AppConfigSkillResourceTest,com.ai.agent.api.ToolCallCoordinatorTimeoutTest,com.ai.agent.subagent.SubAgentRegistryTest,com.ai.agent.subagent.RedisChildRunRegistryIntegrationTest,com.ai.agent.subagent.DefaultSubAgentRunnerTest,com.ai.agent.tool.AgentToolTest,com.ai.agent.api.AgentExecutionBudgetTest,com.ai.agent.api.AgentTurnOrchestratorBudgetTest,com.ai.agent.api.V20ProviderSelectionIntegrationTest,com.ai.agent.trajectory.TrajectoryQueryServiceTest,com.ai.agent.TrajectoryStoreIntegrationTest,com.ai.agent.RedisToolStoreIntegrationTest test`：85 tests，0 failures，0 errors。
+  - `MYSQL_PASSWORD=*** mvn test`：211 tests，0 failures，0 errors。
+- V21-GATE re-review：未发现 P0/P1/P2；允许进入 V2.2。
+- 状态：`V21-07` ~ `V21-15` 与 `V21-GATE` 均置为 DONE。
 
 ## V2.2 任务进度
 

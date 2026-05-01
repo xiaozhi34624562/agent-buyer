@@ -51,6 +51,47 @@ class AgentExecutionBudgetTest {
         assertThat(store.countsByRun.get("run-1")).isEqualTo(2);
     }
 
+    @Test
+    void subAgentTurnBudgetUsesSeparateEventTypeButSharedRunWideCounter() {
+        AgentProperties properties = new AgentProperties();
+        properties.getAgentLoop().setSubAgentLlmCallBudgetPerUserTurn(1);
+        properties.getAgentLoop().setRunWideLlmCallBudget(80);
+        InMemoryRunLlmCallBudgetStore store = new InMemoryRunLlmCallBudgetStore();
+        AgentExecutionBudget budget = new AgentExecutionBudget(properties, store);
+        AgentExecutionBudget.SubAgentTurnBudget turnBudget = budget.startSubAgentTurn("child-run-1");
+
+        budget.reserveSubAgentLlmCall(turnBudget);
+
+        assertThatThrownBy(() -> budget.reserveSubAgentLlmCall(turnBudget))
+                .isInstanceOfSatisfying(LlmCallBudgetExceededException.class, e -> {
+                    assertThat(e.eventType()).isEqualTo("SUB_TURN_BUDGET");
+                    assertThat(e.limit()).isEqualTo(1);
+                    assertThat(e.used()).isEqualTo(1);
+                });
+        assertThat(store.countsByRun.get("child-run-1")).isEqualTo(1);
+    }
+
+    @Test
+    void subAgentCanChargeRunWideBudgetToParentRun() {
+        AgentProperties properties = new AgentProperties();
+        properties.getAgentLoop().setSubAgentLlmCallBudgetPerUserTurn(30);
+        properties.getAgentLoop().setRunWideLlmCallBudget(1);
+        InMemoryRunLlmCallBudgetStore store = new InMemoryRunLlmCallBudgetStore();
+        AgentExecutionBudget budget = new AgentExecutionBudget(properties, store);
+        AgentExecutionBudget.SubAgentTurnBudget turnBudget = budget.startSubAgentTurn("child-run-1", "parent-run-1");
+
+        budget.reserveSubAgentLlmCall(turnBudget);
+
+        assertThatThrownBy(() -> budget.reserveSubAgentLlmCall(turnBudget))
+                .isInstanceOfSatisfying(LlmCallBudgetExceededException.class, e -> {
+                    assertThat(e.eventType()).isEqualTo("RUN_WIDE_BUDGET");
+                    assertThat(e.limit()).isEqualTo(1);
+                    assertThat(e.used()).isEqualTo(1);
+                });
+        assertThat(store.countsByRun).containsEntry("parent-run-1", 1L);
+        assertThat(store.countsByRun).doesNotContainKey("child-run-1");
+    }
+
     private static final class InMemoryRunLlmCallBudgetStore implements RunLlmCallBudgetStore {
         private final Map<String, Long> countsByRun = new HashMap<>();
 

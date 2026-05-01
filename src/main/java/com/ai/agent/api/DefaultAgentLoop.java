@@ -144,6 +144,7 @@ public final class DefaultAgentLoop implements AgentLoop {
                                 new ToolResultCloser(trajectoryStore, trajectoryReader),
                                 objectMapper
                         ),
+                        trajectoryReader,
                         trajectoryStore,
                         new RunStateMachine(trajectoryStore),
                         new AgentExecutionBudget(properties, new LocalRunLlmCallBudgetStore())

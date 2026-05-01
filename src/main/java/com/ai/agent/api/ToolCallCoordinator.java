@@ -125,7 +125,7 @@ public final class ToolCallCoordinator {
             List<ToolTerminal> terminals = toolResultWaiter.awaitResults(
                     runId,
                     executableCalls,
-                    Duration.ofMillis(properties.getAgentLoop().getToolResultTimeoutMs())
+                    effectiveToolResultTimeout(properties, toolRegistry, executableCalls)
             );
             toolResultCloser.closeTerminals(runId, terminals, sink);
             return terminals;
@@ -146,6 +146,25 @@ public final class ToolCallCoordinator {
             );
             throw new ToolResultTimeoutException("tool result timeout", e);
         }
+    }
+
+    static Duration effectiveToolResultTimeout(
+            AgentProperties properties,
+            ToolRegistry toolRegistry,
+            List<ToolCall> executableCalls
+    ) {
+        Duration timeout = Duration.ofMillis(properties.getAgentLoop().getToolResultTimeoutMs());
+        for (ToolCall call : executableCalls) {
+            try {
+                Duration toolTimeout = toolRegistry.resolve(call.toolName()).schema().timeout();
+                if (toolTimeout.compareTo(timeout) > 0) {
+                    timeout = toolTimeout;
+                }
+            } catch (RuntimeException e) {
+                // Unknown tools are handled earlier during commit. Keep the global timeout as a defensive fallback.
+            }
+        }
+        return timeout;
     }
 
     private void closePrecheckFailures(String runId, List<ToolCall> precheckFailedCalls, AgentEventSink sink) {
@@ -193,7 +212,8 @@ public final class ToolCallCoordinator {
                             tool.schema().isConcurrent(),
                             tool.schema().idempotent(),
                             false,
-                            null
+                            null,
+                            tool.schema().timeout().toMillis()
                     );
                     executable.add(call);
                     assistantToolCalls.add(new ToolCallMessage(raw.toolUseId(), tool.schema().name(), validation.normalizedArgsJson()));
@@ -209,7 +229,8 @@ public final class ToolCallCoordinator {
                             tool.schema().isConcurrent(),
                             tool.schema().idempotent(),
                             true,
-                            validation.errorJson()
+                            validation.errorJson(),
+                            tool.schema().timeout().toMillis()
                     );
                     precheckFailed.add(call);
                     assistantToolCalls.add(new ToolCallMessage(raw.toolUseId(), tool.schema().name(), raw.argsJson()));

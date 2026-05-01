@@ -68,13 +68,22 @@ public class LuaRedisToolStore implements RedisToolStore {
             local started = {}
             local startedCount = 0
             local now = tonumber(ARGV[1])
-            local leaseUntil = now + tonumber(ARGV[2])
             for _, id in ipairs(ids) do
               local raw = redis.call('HGET', KEYS[2], id)
               if raw then
                 local state = cjson.decode(raw)
                 local status = state['status']
                 if status == 'WAITING' then
+                  local leaseMs = tonumber(ARGV[2])
+                  local rawCallTimeoutMs = state['call']['timeoutMs']
+                  local callTimeoutMs = 0
+                  if rawCallTimeoutMs ~= nil and rawCallTimeoutMs ~= cjson.null then
+                    callTimeoutMs = tonumber(rawCallTimeoutMs) or 0
+                  end
+                  if callTimeoutMs > leaseMs then
+                    leaseMs = callTimeoutMs
+                  end
+                  local leaseUntil = now + leaseMs
                   local safe = state['call']['isConcurrent']
                   if safe == false then
                     if running == 0 and startedCount == 0 then

@@ -13,6 +13,10 @@ public class AgentRunEntity {
     private String userId;
     private String status;
     private Integer turnNo;
+    private String parentRunId;
+    private String parentToolCallId;
+    private String agentType;
+    private String parentLinkStatus;
     private LocalDateTime startedAt;
     private LocalDateTime updatedAt;
     private LocalDateTime completedAt;
@@ -56,6 +60,38 @@ public class AgentRunEntity {
 
     public void setTurnNo(Integer turnNo) {
         this.turnNo = turnNo;
+    }
+
+    public String getParentRunId() {
+        return parentRunId;
+    }
+
+    public void setParentRunId(String parentRunId) {
+        this.parentRunId = parentRunId;
+    }
+
+    public String getParentToolCallId() {
+        return parentToolCallId;
+    }
+
+    public void setParentToolCallId(String parentToolCallId) {
+        this.parentToolCallId = parentToolCallId;
+    }
+
+    public String getAgentType() {
+        return agentType;
+    }
+
+    public void setAgentType(String agentType) {
+        this.agentType = agentType;
+    }
+
+    public String getParentLinkStatus() {
+        return parentLinkStatus;
+    }
+
+    public void setParentLinkStatus(String parentLinkStatus) {
+        this.parentLinkStatus = parentLinkStatus;
     }
 
     public LocalDateTime getStartedAt() {

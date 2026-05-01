@@ -3,6 +3,13 @@ package com.ai.agent.llm;
 import com.ai.agent.trajectory.ContextCompactionDraft;
 import com.ai.agent.trajectory.RunContext;
 import com.ai.agent.trajectory.TrajectoryReader;
+import com.ai.agent.trajectory.TrajectoryWriter;
+import com.ai.agent.skill.SkillCommandResolution;
+import com.ai.agent.skill.SkillCommandResolver;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -21,6 +28,9 @@ public final class ContextViewBuilder {
     private final LargeResultSpiller largeResultSpiller;
     private final MicroCompactor microCompactor;
     private final SummaryCompactor summaryCompactor;
+    private final SkillCommandResolver skillCommandResolver;
+    private final TrajectoryWriter trajectoryWriter;
+    private final ObjectMapper objectMapper;
     private final TokenEstimator tokenEstimator = new TokenEstimator();
 
     public ContextViewBuilder(
@@ -30,11 +40,59 @@ public final class ContextViewBuilder {
             MicroCompactor microCompactor,
             SummaryCompactor summaryCompactor
     ) {
+        this(
+                trajectoryReader,
+                transcriptPairValidator,
+                largeResultSpiller,
+                microCompactor,
+                summaryCompactor,
+                (SkillCommandResolver) null,
+                null,
+                null
+        );
+    }
+
+    @Autowired
+    public ContextViewBuilder(
+            TrajectoryReader trajectoryReader,
+            TranscriptPairValidator transcriptPairValidator,
+            LargeResultSpiller largeResultSpiller,
+            MicroCompactor microCompactor,
+            SummaryCompactor summaryCompactor,
+            ObjectProvider<SkillCommandResolver> skillCommandResolverProvider,
+            ObjectProvider<TrajectoryWriter> trajectoryWriterProvider,
+            ObjectMapper objectMapper
+    ) {
+        this(
+                trajectoryReader,
+                transcriptPairValidator,
+                largeResultSpiller,
+                microCompactor,
+                summaryCompactor,
+                skillCommandResolverProvider.getIfAvailable(),
+                trajectoryWriterProvider.getIfAvailable(),
+                objectMapper
+        );
+    }
+
+    public ContextViewBuilder(
+            TrajectoryReader trajectoryReader,
+            TranscriptPairValidator transcriptPairValidator,
+            LargeResultSpiller largeResultSpiller,
+            MicroCompactor microCompactor,
+            SummaryCompactor summaryCompactor,
+            SkillCommandResolver skillCommandResolver,
+            TrajectoryWriter trajectoryWriter,
+            ObjectMapper objectMapper
+    ) {
         this.trajectoryReader = trajectoryReader;
         this.transcriptPairValidator = transcriptPairValidator;
         this.largeResultSpiller = largeResultSpiller;
         this.microCompactor = microCompactor;
         this.summaryCompactor = summaryCompactor;
+        this.skillCommandResolver = skillCommandResolver;
+        this.trajectoryWriter = trajectoryWriter;
+        this.objectMapper = objectMapper;
     }
 
     public ProviderContextView build(String runId) {
@@ -54,11 +112,12 @@ public final class ContextViewBuilder {
         List<LlmMessage> rawMessages = trajectoryReader.loadMessages(runId);
         transcriptPairValidator.validate(rawMessages);
         List<ContextCompactionDraft> compactions = new ArrayList<>();
+        List<LlmMessage> workingMessages = injectSlashSkills(runId, turnNo, rawMessages);
 
         List<LlmMessage> providerMessages = collectIfChanged(
                 LARGE_RESULT_SPILL,
-                rawMessages,
-                largeResultSpiller.spill(runId, rawMessages),
+                workingMessages,
+                largeResultSpiller.spill(runId, workingMessages),
                 compactions
         );
         providerMessages = collectIfChanged(
@@ -129,5 +188,44 @@ public final class ContextViewBuilder {
                 .map(LlmMessage::content)
                 .mapToInt(tokenEstimator::estimate)
                 .sum();
+    }
+
+    private List<LlmMessage> injectSlashSkills(String runId, int turnNo, List<LlmMessage> rawMessages) {
+        if (skillCommandResolver == null) {
+            return rawMessages;
+        }
+        SkillCommandResolution resolution = skillCommandResolver.resolve(rawMessages);
+        if (resolution.messages().isEmpty()) {
+            return rawMessages;
+        }
+        List<LlmMessage> injected = new ArrayList<>(rawMessages.size() + resolution.messages().size());
+        injected.addAll(rawMessages);
+        injected.addAll(resolution.messages());
+        writeSkillEvents(runId, turnNo, resolution);
+        return List.copyOf(injected);
+    }
+
+    private void writeSkillEvents(String runId, int turnNo, SkillCommandResolution resolution) {
+        if (trajectoryWriter == null) {
+            return;
+        }
+        for (String skillName : resolution.skillNames()) {
+            trajectoryWriter.writeAgentEvent(runId, "skill_slash_injected", skillEventPayload(turnNo, skillName, resolution.totalTokens()));
+        }
+    }
+
+    private String skillEventPayload(int turnNo, String skillName, int totalTokens) {
+        if (objectMapper == null) {
+            return "{\"skillName\":\"" + skillName + "\"}";
+        }
+        try {
+            return objectMapper.writeValueAsString(Map.of(
+                    "turnNo", turnNo,
+                    "skillName", skillName,
+                    "totalTokens", totalTokens
+            ));
+        } catch (JsonProcessingException e) {
+            return "{\"skillName\":\"" + skillName + "\"}";
+        }
     }
 }

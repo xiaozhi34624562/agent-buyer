@@ -55,7 +55,17 @@ public interface AgentRunMapper extends BaseMapper<AgentRunEntity> {
     String findStatus(@Param("runId") String runId);
 
     @Select("""
-            SELECT run_id, session_id, user_id, status, turn_no, started_at, updated_at, completed_at, last_error
+            SELECT run_id, session_id, user_id, status, turn_no, parent_run_id, parent_tool_call_id,
+                   agent_type, parent_link_status, started_at, updated_at, completed_at, last_error
+            FROM agent_run
+            WHERE parent_tool_call_id = #{parentToolCallId}
+            LIMIT 1
+            """)
+    AgentRunEntity findByParentToolCallId(@Param("parentToolCallId") String parentToolCallId);
+
+    @Select("""
+            SELECT run_id, session_id, user_id, status, turn_no, parent_run_id, parent_tool_call_id,
+                   agent_type, parent_link_status, started_at, updated_at, completed_at, last_error
             FROM agent_run
             WHERE status IN ('CREATED', 'RUNNING')
               AND updated_at < #{cutoff}
@@ -68,7 +78,8 @@ public interface AgentRunMapper extends BaseMapper<AgentRunEntity> {
     );
 
     @Select("""
-            SELECT run_id, session_id, user_id, status, turn_no, started_at, updated_at, completed_at, last_error
+            SELECT run_id, session_id, user_id, status, turn_no, parent_run_id, parent_tool_call_id,
+                   agent_type, parent_link_status, started_at, updated_at, completed_at, last_error
             FROM agent_run
             WHERE status = 'WAITING_USER_CONFIRMATION'
               AND updated_at < #{cutoff}
@@ -78,5 +89,26 @@ public interface AgentRunMapper extends BaseMapper<AgentRunEntity> {
     List<AgentRunEntity> findExpiredConfirmationRuns(
             @Param("cutoff") LocalDateTime cutoff,
             @Param("limit") int limit
+    );
+
+    @Select("""
+            SELECT run_id, session_id, user_id, status, turn_no, parent_run_id, parent_tool_call_id,
+                   agent_type, parent_link_status, started_at, updated_at, completed_at, last_error
+            FROM agent_run
+            WHERE parent_run_id = #{parentRunId}
+              AND parent_link_status = 'LIVE'
+              AND status NOT IN ('SUCCEEDED', 'FAILED', 'FAILED_RECOVERED', 'CANCELLED', 'TIMEOUT')
+            ORDER BY started_at ASC
+            """)
+    List<AgentRunEntity> findLiveChildren(@Param("parentRunId") String parentRunId);
+
+    @Update("""
+            UPDATE agent_run
+            SET parent_link_status = #{parentLinkStatus}
+            WHERE run_id = #{childRunId}
+            """)
+    int updateParentLinkStatus(
+            @Param("childRunId") String childRunId,
+            @Param("parentLinkStatus") String parentLinkStatus
     );
 }

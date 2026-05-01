@@ -5,6 +5,7 @@ import com.ai.agent.llm.LlmMessage;
 import com.ai.agent.llm.ToolCallMessage;
 import com.ai.agent.tool.ToolCall;
 import com.ai.agent.tool.ToolTerminal;
+import com.ai.agent.persistence.mapper.AgentRunMapper;
 import com.ai.agent.trajectory.RunContext;
 import com.ai.agent.trajectory.RunContextStore;
 import com.ai.agent.trajectory.ContextCompactionRecord;
@@ -20,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @Transactional
@@ -35,6 +37,9 @@ class TrajectoryStoreIntegrationTest {
 
     @Autowired
     ContextCompactionStore contextCompactionStore;
+
+    @Autowired
+    AgentRunMapper runMapper;
 
     @Test
     void loadTrajectoryReturnsRunMessagesAttemptsToolCallsResultsAndCompactions() {
@@ -143,5 +148,87 @@ class TrajectoryStoreIntegrationTest {
         assertThat(loaded.maxTurns()).isEqualTo(3);
         assertThat(loaded.createdAt()).isNotNull();
         assertThat(loaded.updatedAt()).isNotNull();
+    }
+
+    @Test
+    void childRunPersistsParentLinkMetadata() {
+        String parentRunId = Ids.newId("parent_run");
+        String childRunId = Ids.newId("child_run");
+
+        trajectoryStore.createRun(parentRunId, "demo-user");
+        var created = trajectoryStore.createChildRun(
+                childRunId,
+                "demo-user",
+                parentRunId,
+                "parent-tool-call-1",
+                "explore",
+                "LIVE"
+        );
+
+        var child = trajectoryReader.loadTrajectorySnapshot(childRunId).run();
+
+        assertThat(created.childRunId()).isEqualTo(childRunId);
+        assertThat(created.created()).isTrue();
+        assertThat(child.getRunId()).isEqualTo(childRunId);
+        assertThat(child.getParentRunId()).isEqualTo(parentRunId);
+        assertThat(child.getParentToolCallId()).isEqualTo("parent-tool-call-1");
+        assertThat(child.getAgentType()).isEqualTo("explore");
+        assertThat(child.getParentLinkStatus()).isEqualTo("LIVE");
+    }
+
+    @Test
+    void childRunCreationReusesExistingParentToolCallAndLiveQueryFiltersDetachedChildren() {
+        String parentRunId = Ids.newId("parent_run");
+        String firstChildRunId = Ids.newId("child_run");
+        String secondChildRunId = Ids.newId("child_run");
+        String parentToolCallId = Ids.newId("parent_tc");
+
+        trajectoryStore.createRun(parentRunId, "demo-user");
+        var created = trajectoryStore.createChildRun(
+                firstChildRunId,
+                "demo-user",
+                parentRunId,
+                parentToolCallId,
+                "explore",
+                "LIVE"
+        );
+        var reused = trajectoryStore.createChildRun(
+                secondChildRunId,
+                "demo-user",
+                parentRunId,
+                parentToolCallId,
+                "explore",
+                "LIVE"
+        );
+
+        assertThat(created.childRunId()).isEqualTo(firstChildRunId);
+        assertThat(created.created()).isTrue();
+        assertThat(reused.childRunId()).isEqualTo(firstChildRunId);
+        assertThat(reused.created()).isFalse();
+        assertThat(runMapper.findLiveChildren(parentRunId))
+                .extracting(com.ai.agent.persistence.entity.AgentRunEntity::getRunId)
+                .containsExactly(firstChildRunId);
+
+        runMapper.updateParentLinkStatus(firstChildRunId, "DETACHED_BY_TIMEOUT");
+
+        assertThat(runMapper.findLiveChildren(parentRunId)).isEmpty();
+    }
+
+    @Test
+    void childRunRejectsUnknownAgentTypeBeforePersisting() {
+        String parentRunId = Ids.newId("parent_run");
+        String childRunId = Ids.newId("child_run");
+
+        trajectoryStore.createRun(parentRunId, "demo-user");
+
+        assertThatThrownBy(() -> trajectoryStore.createChildRun(
+                childRunId,
+                "demo-user",
+                parentRunId,
+                Ids.newId("parent_tc"),
+                "writer",
+                "LIVE"
+        )).isInstanceOf(IllegalArgumentException.class);
+        assertThat(runMapper.selectById(childRunId)).isNull();
     }
 }

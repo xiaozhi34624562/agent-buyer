@@ -34,6 +34,10 @@ class TrajectoryQueryServiceTest {
         String json = objectMapper.writeValueAsString(dto);
 
         assertThat(dto.run()).isNotInstanceOf(AgentRunEntity.class);
+        assertThat(dto.run().agentType()).isEqualTo("SUBAGENT");
+        assertThat(dto.run().parentRunId()).isEqualTo("parent-run-1");
+        assertThat(dto.run().parentToolCallId()).isEqualTo("parent-tool-call-1");
+        assertThat(dto.run().parentLinkStatus()).isEqualTo("LIVE");
         assertThat(dto.messages()).allSatisfy(message -> assertThat(message).isNotInstanceOf(AgentMessageEntity.class));
         assertThat(dto.llmAttempts()).allSatisfy(attempt -> assertThat(attempt).isNotInstanceOf(AgentLlmAttemptEntity.class));
         assertThat(dto.toolCalls()).allSatisfy(toolCall -> assertThat(toolCall).isNotInstanceOf(AgentToolCallTraceEntity.class));
@@ -95,6 +99,10 @@ class TrajectoryQueryServiceTest {
             run.setUserId("demo-user");
             run.setStatus(RunStatus.WAITING_USER_CONFIRMATION.name());
             run.setTurnNo(2);
+            run.setParentRunId("parent-run-1");
+            run.setParentToolCallId("parent-tool-call-1");
+            run.setAgentType("SUBAGENT");
+            run.setParentLinkStatus("LIVE");
             run.setStartedAt(now.minusMinutes(2));
             run.setUpdatedAt(now.minusMinutes(1));
             run.setLastError("{\"confirmToken\":\"ct_secret_run\",\"message\":\"sk-test-secret\"}");

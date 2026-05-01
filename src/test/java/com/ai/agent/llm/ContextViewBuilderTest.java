@@ -1,13 +1,24 @@
 package com.ai.agent.llm;
 
 import com.ai.agent.config.AgentProperties;
+import com.ai.agent.domain.FinishReason;
+import com.ai.agent.domain.RunStatus;
+import com.ai.agent.skill.SkillCommandResolver;
+import com.ai.agent.skill.SkillPathResolver;
+import com.ai.agent.skill.SkillRegistry;
 import com.ai.agent.tool.ToolCall;
+import com.ai.agent.tool.ToolTerminal;
 import com.ai.agent.trajectory.ContextCompactionDraft;
 import com.ai.agent.trajectory.TrajectoryReader;
+import com.ai.agent.trajectory.TrajectoryWriter;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -15,6 +26,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ContextViewBuilderTest {
+    @TempDir
+    Path skillsRoot;
+
     @Test
     void buildsProviderViewFromRawTrajectoryWithoutMutatingRawMessages() {
         FakeTrajectoryReader reader = new FakeTrajectoryReader();
@@ -254,6 +268,53 @@ class ContextViewBuilderTest {
         assertThat(reader.messages.get(6).content()).isEqualTo(rawLargeToolResultContent);
     }
 
+    @Test
+    void injectsSlashSkillAsTransientProviderMessageAndWritesEvent() throws IOException {
+        Path skillDir = Files.createDirectories(skillsRoot.resolve("purchase-guide"));
+        Files.writeString(skillDir.resolve("SKILL.md"), """
+                ---
+                name: purchase-guide
+                description: 买货指南
+                ---
+
+                # Purchase
+
+                full skill content
+                """);
+        FakeTrajectoryStore store = new FakeTrajectoryStore();
+        store.messages.add(LlmMessage.system("s1", "system"));
+        store.messages.add(LlmMessage.user("u1", "help me with /purchase-guide"));
+        AgentProperties properties = new AgentProperties();
+        properties.getSkills().setEnabledSkillNames(List.of("purchase-guide"));
+        ObjectMapper objectMapper = new ObjectMapper();
+        ContextViewBuilder builder = new ContextViewBuilder(
+                store,
+                new TranscriptPairValidator(),
+                noOpSpiller(),
+                noOpMicroCompactor(),
+                noOpSummaryCompactor(),
+                new SkillCommandResolver(
+                        properties,
+                        new SkillRegistry(skillsRoot, List.of("purchase-guide")),
+                        new SkillPathResolver(skillsRoot),
+                        objectMapper
+                ),
+                store,
+                objectMapper
+        );
+
+        ProviderContextView view = builder.build("run-1", 2, null, LlmCallObserver.NOOP);
+
+        assertThat(view.messages()).hasSize(3);
+        assertThat(view.messages().get(2).messageId()).startsWith("transient-skills-");
+        assertThat(view.messages().get(2).content()).contains("<skill name=\"purchase-guide\">", "full skill content");
+        assertThat(store.messages).hasSize(2);
+        assertThat(store.events).singleElement()
+                .satisfies(event -> assertThat(event)
+                        .contains("purchase-guide")
+                        .contains("\"turnNo\":2"));
+    }
+
     private static LargeResultSpiller noOpSpiller() {
         AgentProperties properties = new AgentProperties();
         properties.getContext().setLargeResultThresholdTokens(Integer.MAX_VALUE);
@@ -299,8 +360,8 @@ class ContextViewBuilderTest {
         return builder.toString();
     }
 
-    private static final class FakeTrajectoryReader implements TrajectoryReader {
-        private final List<LlmMessage> messages = new ArrayList<>();
+    private static class FakeTrajectoryReader implements TrajectoryReader {
+        protected final List<LlmMessage> messages = new ArrayList<>();
         private int loadCount;
 
         @Override
@@ -312,6 +373,73 @@ class ContextViewBuilderTest {
         @Override
         public List<ToolCall> findToolCallsByRun(String runId) {
             return List.of();
+        }
+    }
+
+    private static final class FakeTrajectoryStore extends FakeTrajectoryReader implements TrajectoryWriter {
+        private final List<String> events = new ArrayList<>();
+
+        @Override
+        public void createRun(String runId, String userId) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void updateRunStatus(String runId, RunStatus status, String error) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean transitionRunStatus(String runId, RunStatus expected, RunStatus next, String error) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public int nextTurn(String runId) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public String appendMessage(String runId, LlmMessage message) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void writeLlmAttempt(
+                String attemptId,
+                String runId,
+                int turnNo,
+                String provider,
+                String model,
+                String status,
+                FinishReason finishReason,
+                Integer promptTokens,
+                Integer completionTokens,
+                Integer totalTokens,
+                String errorJson,
+                String rawDiagnosticJson
+        ) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void writeToolCall(String messageId, ToolCall call) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public String appendAssistantAndToolCalls(String runId, LlmMessage assistant, List<ToolCall> toolCalls) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void writeToolResult(String runId, String toolUseId, ToolTerminal terminal) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void writeAgentEvent(String runId, String eventType, String payloadJson) {
+            events.add(eventType + ":" + payloadJson);
         }
     }
 

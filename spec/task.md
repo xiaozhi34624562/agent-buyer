@@ -111,23 +111,23 @@ Path: /Users/xiaozhi/.codex/skills/java-alibaba-review/SKILL.md
 
 | ID | 任务 | 验收标准 | 状态 | blockedBy |
 |---|---|---|---|---|
-| V21-01 | 实现 `SkillRegistry` 与 Anthropic skill 扫描 | 可扫描 `skills/*/SKILL.md` frontmatter；preview 只包含 `name + description`; 3 个业务 skill 可被索引 | PENDING | V20-GATE |
-| V21-02 | 实现 `SkillPathResolver` 路径安全 | `skill_view(skillName, skillPath)` 禁止 `..`、绝对路径、符号链接逃逸；路径逃逸返回稳定错误 | PENDING | V21-01 |
-| V21-03 | 实现 `SkillListTool` 与 `SkillViewTool` | `skill_list()` 无 userId 入参，userId 从 `ToolUseContext` 注入；`skill_view` 可返回完整 `SKILL.md` 或 skill 内文件 | PENDING | V21-02 |
-| V21-03a | PromptAssembler 注入 skill preview 列表 | system prompt 在 user info 与 tool-use guidance 之间加入用户可访问 skill preview（`name + description`）；preview 不包含 `SKILL.md` 内容；`systemPromptHash` 重新计算并有测试覆盖 | PENDING | V21-03 |
-| V21-04 | 实现 `SkillCommandResolver` slash skill 注入 | 用户消息含 `/skillName` 时，本轮 provider view 注入完整 `SKILL.md`；不改写 materialized system prompt；访问写 `agent_event` | PENDING | V21-03a |
-| V21-05 | 实现 slash skill budget fail closed | 超过 `agent.skills.max-per-message=3` 或 `max-token-per-message=8000` 时返回 `SKILL_BUDGET_EXCEEDED`；错误体包含命中 skill、预算、实际、超出量 | PENDING | V21-04 |
-| V21-06 | 设计并实现 `AgentTool` schema 与反滥用提示 | `AgentTool` 作为普通 Tool 注册；schema description 明确“高成本工具，请谨慎使用”；MainAgent system prompt 加 spawn hint | PENDING | V21-03 |
-| V21-07 | 增加 child run MySQL 字段与 DTO | 新增 V9 Flyway migration：`agent_run` 增加 `parent_run_id`、`parent_tool_call_id`、`agent_type`、`parent_link_status`; trajectory query DTO 暴露 `parentLinkStatus` | PENDING | V21-06 |
-| V21-08 | 实现 `SubAgentRegistry` 与 `SubAgentProfile` | 至少提供 `ExploreAgent` profile；子 Agent 默认继承 parent tool/skill 能力集合，但不继承 message history、ToDo、compact view | PENDING | V21-06 |
-| V21-09 | 实现 `SubAgentBudgetPolicy`、`ChildRunRegistry` 与 Redis Lua slot reserve | `reserve_child.lua` 原子检查 `max-spawn-per-run=2`、`max-concurrent-per-run=1`、`spawn-budget-per-user-turn=2`; 失败返回 `SUBAGENT_BUDGET_EXCEEDED`；同时实现 `ChildRunRegistry`，维护 parent ↔ child 运行期映射，作为 V22-12 cascade interrupt 的查询入口 | PENDING | V21-07 |
-| V21-10 | 实现 `release_child.lua` 与 child lifecycle | child terminal / timeout / interrupt / detach 释放 in-flight 计数；lifetime spawn 计数不释放；并发 reserve 只有一个成功 | PENDING | V21-09 |
-| V21-11 | 实现 `SubAgentRunner` 同步等待 | `AgentTool` 同步等待 child result summary，默认 3 分钟；成功只把 summary/状态/关键引用/childRunId 返回 parent | PENDING | V21-08,V21-10 |
-| V21-12 | 实现 child timeout 与 parent link status | 等待超过 3 分钟写 `DETACHED_BY_TIMEOUT` 并 interrupt child；parent interrupt / failed 分别写 `DETACHED_BY_INTERRUPT` / `DETACHED_BY_PARENT_FAILED` | PENDING | V21-11 |
-| V21-13 | 扩展 SubAgent LLM call budget | 每个 SubAgent user turn 最多 30 次 LLM call；超限返回 partial summary 并进入 `PAUSED`；写 `SUB_TURN_BUDGET` event | PENDING | V21-11,V20-05 |
-| V21-14 | V2.1 集成测试与负向测试 | 覆盖 slash skill、skill path escape、skill budget、SubAgent 权限继承、history 隔离、reserve race、parentLinkStatus、timeout partial | PENDING | V21-05,V21-13 |
-| V21-15 | V2.1 文档与演示收口 | README/Postman 增加 `/purchase-guide` 示例、SubAgent 同步等待限制、child trajectory 查询示例 | PENDING | V21-14 |
-| V21-GATE | V2.1 hardening review gate | `mvn test` 通过；V20 集成测试全部通过；V2.1 review agent 无 P0/P1/P2；`progress.md` 记录 V2.1 完成摘要；允许开始 V2.2 | PENDING | V21-15 |
+| V21-01 | 实现 `SkillRegistry` 与 Anthropic skill 扫描 | 可扫描 `skills/*/SKILL.md` frontmatter；preview 只包含 `name + description`; 3 个业务 skill 可被索引 | DONE | V20-GATE |
+| V21-02 | 实现 `SkillPathResolver` 路径安全 | `skill_view(skillName, skillPath)` 禁止 `..`、绝对路径、符号链接逃逸；路径逃逸返回稳定错误 | DONE | V21-01 |
+| V21-03 | 实现 `SkillListTool` 与 `SkillViewTool` | `skill_list()` 无 userId 入参，userId 从 `ToolUseContext` 注入；`skill_view` 可返回完整 `SKILL.md` 或 skill 内文件 | DONE | V21-02 |
+| V21-03a | PromptAssembler 注入 skill preview 列表 | system prompt 在 user info 与 tool-use guidance 之间加入用户可访问 skill preview（`name + description`）；preview 不包含 `SKILL.md` 内容；`systemPromptHash` 重新计算并有测试覆盖 | DONE | V21-03 |
+| V21-04 | 实现 `SkillCommandResolver` slash skill 注入 | 用户消息含 `/skillName` 时，本轮 provider view 注入完整 `SKILL.md`；不改写 materialized system prompt；访问写 `agent_event` | DONE | V21-03a |
+| V21-05 | 实现 slash skill budget fail closed | 超过 `agent.skills.max-per-message=3` 或 `max-token-per-message=8000` 时返回 `SKILL_BUDGET_EXCEEDED`；错误体包含命中 skill、预算、实际、超出量 | DONE | V21-04 |
+| V21-06 | 设计并实现 `AgentTool` schema 与反滥用提示 | `AgentTool` 作为普通 Tool 注册；schema description 明确“高成本工具，请谨慎使用”；MainAgent system prompt 加 spawn hint | DONE | V21-03 |
+| V21-07 | 增加 child run MySQL 字段与 DTO | 新增 V9 Flyway migration：`agent_run` 增加 `parent_run_id`、`parent_tool_call_id`、`agent_type`、`parent_link_status`; trajectory query DTO 暴露 `parentLinkStatus` | DONE | V21-06 |
+| V21-08 | 实现 `SubAgentRegistry` 与 `SubAgentProfile` | 至少提供 `ExploreAgent` profile；子 Agent 默认继承 parent tool/skill 能力集合，但不继承 message history、ToDo、compact view | DONE | V21-06 |
+| V21-09 | 实现 `SubAgentBudgetPolicy`、`ChildRunRegistry` 与 Redis Lua slot reserve | `reserve_child.lua` 原子检查 `max-spawn-per-run=2`、`max-concurrent-per-run=1`、`spawn-budget-per-user-turn=2`; 失败返回 `SUBAGENT_BUDGET_EXCEEDED`；同时实现 `ChildRunRegistry`，维护 parent ↔ child 运行期映射，作为 V22-12 cascade interrupt 的查询入口 | DONE | V21-07 |
+| V21-10 | 实现 `release_child.lua` 与 child lifecycle | child terminal / timeout / interrupt / detach 释放 in-flight 计数；lifetime spawn 计数不释放；并发 reserve 只有一个成功 | DONE | V21-09 |
+| V21-11 | 实现 `SubAgentRunner` 同步等待 | `AgentTool` 同步等待 child result summary，默认 3 分钟；成功只把 summary/状态/关键引用/childRunId 返回 parent | DONE | V21-08,V21-10 |
+| V21-12 | 实现 child timeout 与 parent link status | 等待超过 3 分钟写 `DETACHED_BY_TIMEOUT` 并 interrupt child；parent interrupt / failed 分别写 `DETACHED_BY_INTERRUPT` / `DETACHED_BY_PARENT_FAILED` | DONE | V21-11 |
+| V21-13 | 扩展 SubAgent LLM call budget | 每个 SubAgent user turn 最多 30 次 LLM call；超限返回 partial summary 并进入 `PAUSED`；写 `SUB_TURN_BUDGET` event | DONE | V21-11,V20-05 |
+| V21-14 | V2.1 集成测试与负向测试 | 覆盖 slash skill、skill path escape、skill budget、SubAgent 权限继承、history 隔离、reserve race、parentLinkStatus、timeout partial | DONE | V21-05,V21-13 |
+| V21-15 | V2.1 文档与演示收口 | README/Postman 增加 `/purchase-guide` 示例、SubAgent 同步等待限制、child trajectory 查询示例 | DONE | V21-14 |
+| V21-GATE | V2.1 hardening review gate | `mvn test` 通过；V20 集成测试全部通过；V2.1 review agent 无 P0/P1/P2；`progress.md` 记录 V2.1 完成摘要；允许开始 V2.2 | DONE | V21-15 |
 
 ## V2.2 任务：Multi-instance + Pub/Sub + ToDo + Interrupt
 

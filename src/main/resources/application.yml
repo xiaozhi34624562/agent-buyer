@@ -31,6 +31,9 @@ agent:
   default-allowed-tools:
     - query_order
     - cancel_order
+    - skill_list
+    - skill_view
+    - agent_tool
   max-parallel: 6
   max-scan: 256
   lease-ms: 90000
@@ -72,3 +75,19 @@ agent:
     summary-compact-threshold-tokens: 30000
     recent-message-budget-tokens: 2000
     summary-max-tokens: 1200
+  skills:
+    root-path: ${AGENT_SKILLS_ROOT:classpath:skills}
+    enabled-skill-names:
+      - purchase-guide
+      - return-exchange-guide
+      - order-issue-support
+    max-per-message: 3
+    max-token-per-message: 8000
+  sub-agent:
+    max-spawn-per-run: 2
+    max-concurrent-per-run: 1
+    spawn-budget-per-user-turn: 2
+    wait-timeout-ms: 180000
+    executor-core-pool-size: 2
+    executor-max-pool-size: 8
+    executor-queue-capacity: 64

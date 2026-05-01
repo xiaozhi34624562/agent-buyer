@@ -4,9 +4,12 @@ import com.ai.agent.config.AgentProperties;
 import com.ai.agent.domain.RunStatus;
 import com.ai.agent.llm.ContextViewBuilder;
 import com.ai.agent.llm.LlmMessage;
+import com.ai.agent.llm.MessageRole;
 import com.ai.agent.llm.LlmStreamResult;
 import com.ai.agent.llm.ProviderContextView;
+import com.ai.agent.skill.SkillCommandException;
 import com.ai.agent.tool.Tool;
+import com.ai.agent.trajectory.TrajectoryReader;
 import com.ai.agent.trajectory.RunContext;
 import com.ai.agent.trajectory.TrajectoryStore;
 import com.ai.agent.util.Ids;
@@ -26,6 +29,7 @@ public final class AgentTurnOrchestrator {
     private final ContextViewBuilder contextViewBuilder;
     private final LlmAttemptService llmAttemptService;
     private final ToolCallCoordinator toolCallCoordinator;
+    private final TrajectoryReader trajectoryReader;
     private final TrajectoryStore trajectoryStore;
     private final RunStateMachine stateMachine;
     private final AgentExecutionBudget executionBudget;
@@ -35,6 +39,7 @@ public final class AgentTurnOrchestrator {
             ContextViewBuilder contextViewBuilder,
             LlmAttemptService llmAttemptService,
             ToolCallCoordinator toolCallCoordinator,
+            TrajectoryReader trajectoryReader,
             TrajectoryStore trajectoryStore,
             RunStateMachine stateMachine,
             AgentExecutionBudget executionBudget
@@ -43,6 +48,7 @@ public final class AgentTurnOrchestrator {
         this.contextViewBuilder = contextViewBuilder;
         this.llmAttemptService = llmAttemptService;
         this.toolCallCoordinator = toolCallCoordinator;
+        this.trajectoryReader = trajectoryReader;
         this.trajectoryStore = trajectoryStore;
         this.stateMachine = stateMachine;
         this.executionBudget = executionBudget;
@@ -55,11 +61,47 @@ public final class AgentTurnOrchestrator {
             LlmParams params,
             AgentEventSink sink
     ) {
+        return runUntilStop(runId, runId, userId, runContext, params, sink, false);
+    }
+
+    public AgentRunResult runSubAgentUntilStop(
+            String runId,
+            String userId,
+            RunContext runContext,
+            LlmParams params,
+            AgentEventSink sink
+    ) {
+        return runSubAgentUntilStop(runId, runId, userId, runContext, params, sink);
+    }
+
+    public AgentRunResult runSubAgentUntilStop(
+            String runId,
+            String runWideBudgetRunId,
+            String userId,
+            RunContext runContext,
+            LlmParams params,
+            AgentEventSink sink
+    ) {
+        return runUntilStop(runId, runWideBudgetRunId, userId, runContext, params, sink, true);
+    }
+
+    private AgentRunResult runUntilStop(
+            String runId,
+            String runWideBudgetRunId,
+            String userId,
+            RunContext runContext,
+            LlmParams params,
+            AgentEventSink sink,
+            boolean subAgentRun
+    ) {
         Instant deadline = Instant.now().plusMillis(properties.getAgentLoop().getRunWallclockTimeoutMs());
         int maxTurns = runContext.maxTurns();
         List<Tool> allowedTools = toolCallCoordinator.toolsFromContext(runContext.effectiveAllowedTools());
         String model = runContext.model();
-        AgentExecutionBudget.MainTurnBudget turnBudget = executionBudget.startMainTurn(runId);
+        AgentExecutionBudget.MainTurnBudget mainTurnBudget = subAgentRun ? null : executionBudget.startMainTurn(runId);
+        AgentExecutionBudget.SubAgentTurnBudget subAgentTurnBudget = subAgentRun
+                ? executionBudget.startSubAgentTurn(runId, runWideBudgetRunId)
+                : null;
 
         for (int i = 0; i < maxTurns; i++) {
             AgentRunResult stopped = stopIfNotRunning(runId);
@@ -86,14 +128,20 @@ public final class AgentTurnOrchestrator {
                             runId,
                             turnNo,
                             runContext,
-                            () -> executionBudget.reserveMainLlmCall(turnBudget)
+                            () -> reserveLlmCall(mainTurnBudget, subAgentTurnBudget)
                     );
                 } catch (LlmCallBudgetExceededException e) {
                     stopped = stopIfNotRunning(runId);
                     if (stopped != null) {
                         return stopped;
                     }
-                    return pauseForBudgetExceeded(runId, e, sink);
+                    return pauseForBudgetExceeded(runId, e, sink, subAgentRun);
+                } catch (SkillCommandException e) {
+                    stopped = stopIfNotRunning(runId);
+                    if (stopped != null) {
+                        return stopped;
+                    }
+                    return failForSkillCommand(runId, e, sink);
                 } catch (Exception e) {
                     stopped = stopIfNotRunning(runId);
                     if (stopped != null) {
@@ -123,7 +171,7 @@ public final class AgentTurnOrchestrator {
                             allowedTools,
                             contextView.compactions(),
                             sink,
-                            () -> executionBudget.reserveMainLlmCall(turnBudget)
+                            () -> reserveLlmCall(mainTurnBudget, subAgentTurnBudget)
                     );
                     stopped = stopIfNotRunning(runId);
                     if (stopped != null) {
@@ -135,7 +183,7 @@ public final class AgentTurnOrchestrator {
                     if (stopped != null) {
                         return stopped;
                     }
-                    return pauseForBudgetExceeded(runId, e, sink);
+                    return pauseForBudgetExceeded(runId, e, sink, subAgentRun);
                 } catch (Exception e) {
                     stopped = stopIfNotRunning(runId);
                     if (stopped != null) {
@@ -221,10 +269,22 @@ public final class AgentTurnOrchestrator {
         return terminal;
     }
 
+    private void reserveLlmCall(
+            AgentExecutionBudget.MainTurnBudget mainTurnBudget,
+            AgentExecutionBudget.SubAgentTurnBudget subAgentTurnBudget
+    ) {
+        if (subAgentTurnBudget != null) {
+            executionBudget.reserveSubAgentLlmCall(subAgentTurnBudget);
+            return;
+        }
+        executionBudget.reserveMainLlmCall(mainTurnBudget);
+    }
+
     private AgentRunResult pauseForBudgetExceeded(
             String runId,
             LlmCallBudgetExceededException exception,
-            AgentEventSink sink
+            AgentEventSink sink,
+            boolean subAgentRun
     ) {
         RunStateMachine.TransitionResult transition = stateMachine.pauseFromRunning(runId, exception.eventType());
         if (!transition.changed()) {
@@ -232,7 +292,7 @@ public final class AgentTurnOrchestrator {
             return new AgentRunResult(runId, transition.status(), null);
         }
         trajectoryStore.writeAgentEvent(runId, exception.eventType(), budgetEventJson(exception));
-        String finalText = "LLM 调用预算已达到上限，本轮已暂停。请补充说明后继续。";
+        String finalText = budgetPauseText(runId, subAgentRun);
         sink.onFinal(new FinalEvent(runId, finalText, RunStatus.PAUSED, "user_input"));
         log.warn(
                 "agent run paused because llm budget exceeded eventType={} limit={} used={}",
@@ -243,11 +303,47 @@ public final class AgentTurnOrchestrator {
         return new AgentRunResult(runId, RunStatus.PAUSED, finalText);
     }
 
+    private String budgetPauseText(String runId, boolean subAgentRun) {
+        if (!subAgentRun) {
+            return "LLM 调用预算已达到上限，本轮已暂停。请补充说明后继续。";
+        }
+        String partialSummary = latestAssistantSummary(runId);
+        if (partialSummary.isBlank()) {
+            return "SubAgent 已达到 LLM 调用预算，本轮已暂停。当前没有可提取的阶段性结论。";
+        }
+        return "SubAgent 已达到 LLM 调用预算，本轮已暂停。当前阶段性结论：\n" + partialSummary;
+    }
+
+    private String latestAssistantSummary(String runId) {
+        try {
+            List<LlmMessage> messages = trajectoryReader.loadMessages(runId);
+            for (int index = messages.size() - 1; index >= 0; index--) {
+                LlmMessage message = messages.get(index);
+                if (message.role() == MessageRole.ASSISTANT && message.content() != null && !message.content().isBlank()) {
+                    return message.content();
+                }
+            }
+        } catch (RuntimeException e) {
+            log.warn("failed to build subagent partial summary runId={}", runId, e);
+        }
+        return "";
+    }
+
     private String budgetEventJson(LlmCallBudgetExceededException exception) {
         return "{\"eventType\":\"" + exception.eventType()
                 + "\",\"limit\":" + exception.limit()
                 + ",\"used\":" + exception.used()
                 + "}";
+    }
+
+    private AgentRunResult failForSkillCommand(String runId, SkillCommandException exception, AgentEventSink sink) {
+        AgentRunResult terminal = transitionFromRunning(runId, RunStatus.FAILED, exception.code(), null);
+        if (terminal.status() != RunStatus.FAILED) {
+            return terminal;
+        }
+        sink.onError(new ErrorEvent(runId, exception.getMessage(), exception.code(), exception.details()));
+        log.warn("agent run failed because slash skill command is invalid code={}", exception.code());
+        return terminal;
     }
 
     private AgentRunResult stopIfNotRunning(String runId) {
