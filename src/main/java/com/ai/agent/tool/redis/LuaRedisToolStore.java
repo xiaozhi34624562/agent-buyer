@@ -34,13 +34,21 @@ public class LuaRedisToolStore implements RedisToolStore {
               redis.call('HSET', KEYS[2], ARGV[2], cjson.encode(state))
               return 1
             end
+            if redis.call('HEXISTS', KEYS[4], 'interrupt_requested') == 1 then
+              state['status'] = 'CANCELLED'
+              state['cancelReason'] = 'INTERRUPTED'
+              state['errorJson'] = ARGV[6]
+              redis.call('HSET', KEYS[2], ARGV[2], cjson.encode(state))
+              return 1
+            end
             redis.call('ZADD', KEYS[1], ARGV[3], ARGV[2])
             redis.call('HSET', KEYS[2], ARGV[2], ARGV[4])
             return 1
             """;
 
     private static final String SCHEDULE_SCRIPT = """
-            if redis.call('HEXISTS', KEYS[4], 'abort_requested') == 1 then
+            if redis.call('HEXISTS', KEYS[4], 'abort_requested') == 1
+              or redis.call('HEXISTS', KEYS[4], 'interrupt_requested') == 1 then
               return {}
             end
             local ids = redis.call('ZRANGE', KEYS[1], 0, tonumber(ARGV[4]) - 1)
@@ -128,7 +136,8 @@ public class LuaRedisToolStore implements RedisToolStore {
             end
             local state = cjson.decode(raw)
             local terminal = cjson.decode(ARGV[4])
-            if redis.call('HEXISTS', KEYS[3], 'abort_requested') == 1
+            if (redis.call('HEXISTS', KEYS[3], 'abort_requested') == 1
+              or redis.call('HEXISTS', KEYS[3], 'interrupt_requested') == 1)
               and terminal['status'] ~= 'CANCELLED'
               and state['call']['idempotent'] == true then
               return 0
@@ -284,7 +293,8 @@ public class LuaRedisToolStore implements RedisToolStore {
                 call.toolCallId(),
                 Long.toString(call.seq()),
                 toJson(state),
-                "{\"type\":\"run_aborted\",\"message\":\"tool call ingested after run abort\"}"
+                "{\"type\":\"run_aborted\",\"message\":\"tool call ingested after run abort\"}",
+                "{\"type\":\"interrupted\",\"message\":\"tool call ingested after run interrupt\"}"
         );
         boolean ingested = result != null && result == 1L;
         if (ingested) {
@@ -399,6 +409,11 @@ public class LuaRedisToolStore implements RedisToolStore {
     }
 
     @Override
+    public void removeActiveRun(String runId) {
+        redisTemplate.opsForSet().remove(keys.activeRuns(), runId);
+    }
+
+    @Override
     public List<ToolTerminal> abort(String runId, String reason) {
         redisTemplate.opsForHash().put(keys.meta(runId), "abort_requested", reason == null ? "true" : reason);
         List<String> terminals = redisTemplate.execute(
@@ -414,9 +429,35 @@ public class LuaRedisToolStore implements RedisToolStore {
     }
 
     @Override
+    public List<ToolTerminal> interrupt(String runId, String reason) {
+        redisTemplate.opsForHash().put(keys.meta(runId), "interrupt_requested", reason == null ? "true" : reason);
+        redisTemplate.opsForHash().put(keys.meta(runId), "interrupt_at", Long.toString(Instant.now().toEpochMilli()));
+        List<String> terminals = redisTemplate.execute(
+                new DefaultRedisScript<>(CANCEL_ACTIVE_SCRIPT, List.class),
+                List.of(keys.queue(runId), keys.tools(runId), keys.leases(runId)),
+                CancelReason.INTERRUPTED.name(),
+                "{\"type\":\"interrupted\",\"reason\":\"" + (reason == null ? "interrupt_requested" : reason) + "\"}"
+        );
+        if (terminals == null) {
+            return List.of();
+        }
+        return terminals.stream().map(this::readTerminal).toList();
+    }
+
+    @Override
     public boolean abortRequested(String runId) {
-        Object value = redisTemplate.opsForHash().get(keys.meta(runId), "abort_requested");
-        return value != null;
+        return redisTemplate.opsForHash().get(keys.meta(runId), "abort_requested") != null
+                || interruptRequested(runId);
+    }
+
+    @Override
+    public boolean interruptRequested(String runId) {
+        return redisTemplate.opsForHash().get(keys.meta(runId), "interrupt_requested") != null;
+    }
+
+    @Override
+    public void clearInterrupt(String runId) {
+        redisTemplate.opsForHash().delete(keys.meta(runId), "interrupt_requested", "interrupt_at");
     }
 
     private CancelReason abortReason(String reason) {

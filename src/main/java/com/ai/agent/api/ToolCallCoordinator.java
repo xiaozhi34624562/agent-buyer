@@ -106,6 +106,12 @@ public final class ToolCallCoordinator {
         return terminals;
     }
 
+    public List<ToolTerminal> interruptRunTools(String runId, String reason, AgentEventSink sink) {
+        List<ToolTerminal> terminals = redisToolStore.interrupt(runId, reason);
+        toolResultCloser.closeTerminals(runId, terminals, sink);
+        return terminals;
+    }
+
     public List<Tool> toolsFromContext(List<String> effectiveAllowedTools) {
         return effectiveAllowedTools.stream()
                 .map(toolRegistry::resolve)

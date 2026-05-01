@@ -1,19 +1,32 @@
 package com.ai.agent.api;
 
 import com.ai.agent.domain.RunStatus;
+import com.ai.agent.tool.redis.RedisToolStore;
 import com.ai.agent.trajectory.TrajectoryStore;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
 public final class RunAccessManager {
     private final TrajectoryStore trajectoryStore;
     private final ContinuationLockService continuationLockService;
+    private final RedisToolStore redisToolStore;
     private final RunStateMachine stateMachine;
 
-    public RunAccessManager(TrajectoryStore trajectoryStore, ContinuationLockService continuationLockService) {
+    @Autowired
+    public RunAccessManager(
+            TrajectoryStore trajectoryStore,
+            ContinuationLockService continuationLockService,
+            RedisToolStore redisToolStore
+    ) {
         this.trajectoryStore = trajectoryStore;
         this.continuationLockService = continuationLockService;
+        this.redisToolStore = redisToolStore;
         this.stateMachine = new RunStateMachine(trajectoryStore);
+    }
+
+    public RunAccessManager(TrajectoryStore trajectoryStore, ContinuationLockService continuationLockService) {
+        this(trajectoryStore, continuationLockService, null);
     }
 
     public void assertOwner(String runId, String userId) {
@@ -57,9 +70,18 @@ public final class RunAccessManager {
         }
         try {
             RunStatus status = requireContinuable(runId);
+            if (status == RunStatus.PAUSED && redisToolStore != null) {
+                redisToolStore.clearInterrupt(runId);
+            }
             if (!stateMachine.startContinuation(runId, status).changed()) {
                 throw new RunContinuationNotAllowedException(
                         "run must still be WAITING_USER_CONFIRMATION or PAUSED before continuation starts: " + runId
+                );
+            }
+            if (status == RunStatus.PAUSED && redisToolStore != null && redisToolStore.interruptRequested(runId)) {
+                stateMachine.pauseFromRunning(runId, "user_interrupt");
+                throw new RunContinuationNotAllowedException(
+                        "run was interrupted before continuation start: " + runId
                 );
             }
             return new ContinuationPermit(lock, status);

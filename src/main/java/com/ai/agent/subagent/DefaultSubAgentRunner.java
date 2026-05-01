@@ -20,6 +20,7 @@ import com.ai.agent.trajectory.RunContext;
 import com.ai.agent.trajectory.RunContextStore;
 import com.ai.agent.trajectory.TrajectoryReader;
 import com.ai.agent.trajectory.TrajectoryStore;
+import com.ai.agent.tool.redis.RedisToolStore;
 import com.ai.agent.util.Ids;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Lazy;
@@ -45,6 +46,7 @@ public final class DefaultSubAgentRunner implements SubAgentRunner {
     private final RunContextStore runContextStore;
     private final AgentTurnOrchestrator turnOrchestrator;
     private final ToolCallCoordinator toolCallCoordinator;
+    private final RedisToolStore redisToolStore;
     private final ExecutorService subAgentExecutor;
 
     public DefaultSubAgentRunner(
@@ -56,6 +58,7 @@ public final class DefaultSubAgentRunner implements SubAgentRunner {
             RunContextStore runContextStore,
             AgentTurnOrchestrator turnOrchestrator,
             ToolCallCoordinator toolCallCoordinator,
+            RedisToolStore redisToolStore,
             @Qualifier("subAgentExecutor") ExecutorService subAgentExecutor
     ) {
         this.properties = properties;
@@ -66,6 +69,7 @@ public final class DefaultSubAgentRunner implements SubAgentRunner {
         this.runContextStore = runContextStore;
         this.turnOrchestrator = turnOrchestrator;
         this.toolCallCoordinator = toolCallCoordinator;
+        this.redisToolStore = redisToolStore;
         this.subAgentExecutor = subAgentExecutor;
     }
 
@@ -169,21 +173,34 @@ public final class DefaultSubAgentRunner implements SubAgentRunner {
             if (future != null) {
                 future.cancel(true);
             }
+            boolean interrupted = redisToolStore != null && redisToolStore.interruptRequested(task.parentRunId());
+            RunStatus childStatus = interrupted ? RunStatus.PAUSED : RunStatus.CANCELLED;
+            String reason = interrupted ? "parent interrupted" : "parent run aborted";
+            ParentLinkStatus linkStatus = interrupted
+                    ? ParentLinkStatus.DETACHED_BY_INTERRUPT
+                    : ParentLinkStatus.DETACHED_BY_PARENT_FAILED;
+            ChildReleaseReason releaseReason = interrupted ? ChildReleaseReason.INTERRUPTED : ChildReleaseReason.PARENT_FAILED;
             if (childRunStarted) {
-                toolCallCoordinator.abortRunTools(childRunId, "parent_run_aborted", NoopAgentEventSink.INSTANCE);
-                trajectoryStore.updateRunStatus(childRunId, RunStatus.CANCELLED, "parent run aborted");
-                trajectoryStore.updateParentLinkStatus(childRunId, ParentLinkStatus.DETACHED_BY_PARENT_FAILED.name());
+                if (interrupted) {
+                    toolCallCoordinator.interruptRunTools(childRunId, "parent_interrupted", NoopAgentEventSink.INSTANCE);
+                } else {
+                    toolCallCoordinator.abortRunTools(childRunId, "parent_run_aborted", NoopAgentEventSink.INSTANCE);
+                }
+                trajectoryStore.updateRunStatus(childRunId, childStatus, reason);
+                trajectoryStore.updateParentLinkStatus(childRunId, linkStatus.name());
             }
             childRunRegistry.release(
                     task.parentRunId(),
                     childRunId,
-                    ChildReleaseReason.PARENT_FAILED,
-                    ParentLinkStatus.DETACHED_BY_PARENT_FAILED
+                    releaseReason,
+                    linkStatus
             );
             return new SubAgentResult(
                     childRunId,
-                    RunStatus.CANCELLED,
-                    "SubAgent was cancelled because the parent run was aborted.",
+                    childStatus,
+                    interrupted
+                            ? "SubAgent was interrupted with the parent run."
+                            : "SubAgent was cancelled because the parent run was aborted.",
                     true
             );
         } catch (RejectedExecutionException e) {

@@ -1,8 +1,8 @@
 {
   "info": {
     "_postman_id": "7eb77a58-1bb2-4e0b-85e1-agent-buyer-v1a",
-    "name": "agent-buyer V1a",
-    "description": "Postman collection for validating agent-buyer V1a: health, SSE agent loop, dry-run confirmation, trajectory, abort, and metrics.",
+    "name": "agent-buyer V2",
+    "description": "Postman collection for validating agent-buyer V2: health, SSE agent loop, dry-run confirmation, trajectory, abort/interrupt, skills, SubAgent, ToDo, and metrics.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -23,6 +23,11 @@
     },
     {
       "key": "rejectRunId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "todoRunId",
       "value": "",
       "type": "string"
     }
@@ -670,7 +675,115 @@
       ]
     },
     {
-      "name": "13 Prometheus Metrics",
+      "name": "13 Create Run - ToDo Tools",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "text/event-stream"
+          },
+          {
+            "key": "X-User-Id",
+            "value": "{{userId}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"这个任务比较复杂，请先用 ToDo 拆解，再查询我最近订单并逐步更新任务状态\"\n    }\n  ],\n  \"allowedToolNames\": [\"query_order\", \"todo_create\", \"todo_write\"],\n  \"llmParams\": {\n    \"model\": \"deepseek-reasoner\",\n    \"temperature\": 0.2,\n    \"maxTokens\": 4096\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/agent/runs",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "agent",
+            "runs"
+          ]
+        },
+        "description": "V2.2 验证：todo_create / todo_write 可被模型作为短期计划工具使用；每 3 turn 的 reminder 由服务端 transient 注入 provider view，不持久化为对外 conversation。真实模型是否调用 ToDo 取决于 provider 输出。"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('todo scenario accepted', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.text();",
+              "const runMatches = [...body.matchAll(/\"runId\"\\s*:\\s*\"([^\"]+)\"/g)];",
+              "if (runMatches.length > 0) {",
+              "  const runId = runMatches[runMatches.length - 1][1];",
+              "  pm.collectionVariables.set('todoRunId', runId);",
+              "  console.log('Captured todoRunId:', runId);",
+              "}",
+              "",
+              "pm.test('todo scenario returns final event', function () {",
+              "  pm.expect(body).to.include('event:final');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "14 Interrupt Run",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-User-Id",
+            "value": "{{userId}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/agent/runs/{{todoRunId}}/interrupt",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "agent",
+            "runs",
+            "{{todoRunId}}",
+            "interrupt"
+          ]
+        },
+        "description": "V2.2 验证：interrupt 使用独立 interrupt_requested control field。active run 会进入 PAUSED；terminal run 会保持原状态并 changed=false。"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('interrupt request is stable for terminal or active run', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const json = pm.response.json();",
+              "  pm.expect(['PAUSED', 'SUCCEEDED', 'FAILED', 'TIMEOUT', 'CANCELLED', 'WAITING_USER_CONFIRMATION']).to.include(json.status);",
+              "  pm.expect(json).to.have.property('changed');",
+              "  if (json.status === 'PAUSED') {",
+              "    pm.expect(json.nextActionRequired).to.eql('user_input');",
+              "  } else {",
+              "    pm.expect([null, undefined]).to.include(json.nextActionRequired);",
+              "  }",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "15 Prometheus Metrics",
       "request": {
         "method": "GET",
         "header": [],

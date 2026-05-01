@@ -6,6 +6,11 @@ import com.ai.agent.domain.RunStatus;
 import com.ai.agent.skill.SkillCommandResolver;
 import com.ai.agent.skill.SkillPathResolver;
 import com.ai.agent.skill.SkillRegistry;
+import com.ai.agent.todo.TodoDraft;
+import com.ai.agent.todo.TodoReminderInjector;
+import com.ai.agent.todo.TodoStatus;
+import com.ai.agent.todo.TodoStep;
+import com.ai.agent.todo.TodoStore;
 import com.ai.agent.tool.ToolCall;
 import com.ai.agent.tool.ToolTerminal;
 import com.ai.agent.trajectory.ContextCompactionDraft;
@@ -315,6 +320,39 @@ class ContextViewBuilderTest {
                         .contains("\"turnNo\":2"));
     }
 
+    @Test
+    void injectsTodoReminderAsTransientProviderMessageWithoutMutatingTrajectory() {
+        FakeTrajectoryReader reader = new FakeTrajectoryReader();
+        reader.messages.add(LlmMessage.system("s1", "system"));
+        reader.messages.add(LlmMessage.user("u1", "继续"));
+        FakeTodoStore todoStore = new FakeTodoStore(List.of(
+                new TodoStep("step_1", "查询待取消订单", TodoStatus.PENDING, null, null),
+                new TodoStep("step_2", "完成取消", TodoStatus.IN_PROGRESS, "等待工具结果", null)
+        ));
+        ContextViewBuilder builder = new ContextViewBuilder(
+                reader,
+                new TranscriptPairValidator(),
+                noOpSpiller(),
+                noOpMicroCompactor(),
+                noOpSummaryCompactor(),
+                null,
+                new TodoReminderInjector(todoStore),
+                null,
+                new ObjectMapper()
+        );
+
+        ProviderContextView view = builder.build("run-1", 3, null, LlmCallObserver.NOOP);
+
+        assertThat(view.messages()).hasSize(3);
+        LlmMessage reminder = view.messages().get(2);
+        assertThat(reminder.role()).isEqualTo(MessageRole.USER);
+        assertThat(reminder.messageId()).isEqualTo("todo-reminder-run-1-3");
+        assertThat(reminder.content()).contains("step_1", "查询待取消订单", "IN_PROGRESS");
+        assertThat(reminder.extras()).containsEntry("todoReminder", true);
+        assertThat(todoStore.reminderRecorded).isTrue();
+        assertThat(reader.messages).hasSize(2);
+    }
+
     private static LargeResultSpiller noOpSpiller() {
         AgentProperties properties = new AgentProperties();
         properties.getContext().setLargeResultThresholdTokens(Integer.MAX_VALUE);
@@ -440,6 +478,40 @@ class ContextViewBuilderTest {
         @Override
         public void writeAgentEvent(String runId, String eventType, String payloadJson) {
             events.add(eventType + ":" + payloadJson);
+        }
+    }
+
+    private static final class FakeTodoStore implements TodoStore {
+        private final List<TodoStep> openSteps;
+        private boolean reminderRecorded;
+
+        private FakeTodoStore(List<TodoStep> openSteps) {
+            this.openSteps = openSteps;
+        }
+
+        @Override
+        public List<TodoStep> replacePlan(String runId, List<TodoDraft> items) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public TodoStep updateStep(String runId, String stepId, TodoStatus status, String notes) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public List<TodoStep> listSteps(String runId) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public List<TodoStep> findOpenTodos(String runId) {
+            return openSteps;
+        }
+
+        @Override
+        public void recordReminder(String runId, int turnNo, List<TodoStep> openSteps) {
+            reminderRecorded = true;
         }
     }
 

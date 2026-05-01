@@ -12,6 +12,8 @@ import com.ai.agent.trajectory.TrajectoryStore;
 import com.ai.agent.util.Ids;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
@@ -27,10 +29,25 @@ public final class ToolResultCloser {
 
     private final TrajectoryStore trajectoryStore;
     private final TrajectoryReader trajectoryReader;
+    private final ToolResultPubSub pubSub;
 
     public ToolResultCloser(TrajectoryStore trajectoryStore, TrajectoryReader trajectoryReader) {
+        this(trajectoryStore, trajectoryReader, (ToolResultPubSub) null);
+    }
+
+    @Autowired
+    public ToolResultCloser(
+            TrajectoryStore trajectoryStore,
+            TrajectoryReader trajectoryReader,
+            ObjectProvider<ToolResultPubSub> pubSubProvider
+    ) {
+        this(trajectoryStore, trajectoryReader, pubSubProvider == null ? null : pubSubProvider.getIfAvailable());
+    }
+
+    private ToolResultCloser(TrajectoryStore trajectoryStore, TrajectoryReader trajectoryReader, ToolResultPubSub pubSub) {
         this.trajectoryStore = trajectoryStore;
         this.trajectoryReader = trajectoryReader;
+        this.pubSub = pubSub;
     }
 
     public void closeTerminal(String runId, ToolCall call, ToolTerminal terminal, AgentEventSink sink) {
@@ -101,6 +118,9 @@ public final class ToolResultCloser {
                     terminal.resultJson(),
                     terminal.errorJson()
             ));
+        }
+        if (wrote && pubSub != null) {
+            pubSub.publish(runId, call.toolCallId());
         }
     }
 

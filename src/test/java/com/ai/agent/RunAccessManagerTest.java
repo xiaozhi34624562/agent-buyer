@@ -7,7 +7,10 @@ import com.ai.agent.domain.FinishReason;
 import com.ai.agent.domain.RunStatus;
 import com.ai.agent.llm.LlmMessage;
 import com.ai.agent.tool.ToolCall;
+import com.ai.agent.tool.CancelReason;
+import com.ai.agent.tool.StartedTool;
 import com.ai.agent.tool.ToolTerminal;
+import com.ai.agent.tool.redis.RedisToolStore;
 import com.ai.agent.tool.redis.RedisKeys;
 import com.ai.agent.trajectory.TrajectoryStore;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,6 +23,8 @@ import java.lang.reflect.Proxy;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -105,6 +110,61 @@ class RunAccessManagerTest {
                 "transition:" + runId + ":PAUSED->RUNNING"
         );
         assertThat(trajectoryStore.events).doesNotContain("release:" + runId);
+    }
+
+    @Test
+    void acquireContinuationClearsPausedInterruptBeforeStartingRun() {
+        String runId = "run-paused-interrupted";
+        trajectoryStore.owner = "owner";
+        trajectoryStore.status = RunStatus.PAUSED;
+        FakeRedisToolStore toolStore = new FakeRedisToolStore(trajectoryStore.events);
+        runAccessManager = new RunAccessManager(
+                trajectoryStore,
+                new ContinuationLockService(new RedisKeys(new AgentProperties()), redisTemplate),
+                toolStore
+        );
+
+        RunAccessManager.ContinuationPermit acquired = runAccessManager.acquireContinuation("owner", runId);
+
+        assertThat(acquired.runId()).isEqualTo(runId);
+        assertThat(toolStore.clearedRunIds).containsExactly(runId);
+        assertThat(trajectoryStore.events).containsSequence(
+                "findOwner:" + runId,
+                "acquire:" + runId,
+                "findStatus:" + runId,
+                "clearInterrupt:" + runId,
+                "transition:" + runId + ":PAUSED->RUNNING"
+        );
+    }
+
+    @Test
+    void acquireContinuationKeepsPausedWhenNewInterruptArrivesAfterClear() {
+        String runId = "run-paused-interrupt-race";
+        trajectoryStore.owner = "owner";
+        trajectoryStore.status = RunStatus.PAUSED;
+        FakeRedisToolStore toolStore = new FakeRedisToolStore(trajectoryStore.events);
+        toolStore.interruptRequestedAfterClear = true;
+        runAccessManager = new RunAccessManager(
+                trajectoryStore,
+                new ContinuationLockService(new RedisKeys(new AgentProperties()), redisTemplate),
+                toolStore
+        );
+
+        assertThatThrownBy(() -> runAccessManager.acquireContinuation("owner", runId))
+                .isInstanceOf(RunAccessManager.RunContinuationNotAllowedException.class)
+                .hasMessageContaining("interrupted");
+
+        assertThat(trajectoryStore.status).isEqualTo(RunStatus.PAUSED);
+        assertThat(trajectoryStore.events).containsSequence(
+                "findOwner:" + runId,
+                "acquire:" + runId,
+                "findStatus:" + runId,
+                "clearInterrupt:" + runId,
+                "transition:" + runId + ":PAUSED->RUNNING",
+                "interruptRequested:" + runId,
+                "transition:" + runId + ":RUNNING->PAUSED",
+                "release:" + runId
+        );
     }
 
     @Test
@@ -431,5 +491,72 @@ class RunAccessManagerTest {
             throw new UnsupportedOperationException();
         }
 
+    }
+
+    private static final class FakeRedisToolStore implements RedisToolStore {
+        private final List<String> events;
+        private final List<String> clearedRunIds = new ArrayList<>();
+        private boolean interruptRequestedAfterClear;
+
+        private FakeRedisToolStore(List<String> events) {
+            this.events = events;
+        }
+
+        @Override
+        public boolean ingestWaiting(String runId, ToolCall call) {
+            return false;
+        }
+
+        @Override
+        public List<StartedTool> schedule(String runId) {
+            return List.of();
+        }
+
+        @Override
+        public boolean complete(StartedTool running, ToolTerminal terminal) {
+            return false;
+        }
+
+        @Override
+        public List<ToolTerminal> reapExpiredLeases(String runId, long nowMillis) {
+            return List.of();
+        }
+
+        @Override
+        public List<ToolTerminal> cancelWaiting(String runId, CancelReason reason) {
+            return List.of();
+        }
+
+        @Override
+        public Optional<ToolTerminal> terminal(String runId, String toolCallId) {
+            return Optional.empty();
+        }
+
+        @Override
+        public Set<String> activeRunIds() {
+            return Set.of();
+        }
+
+        @Override
+        public List<ToolTerminal> abort(String runId, String reason) {
+            return List.of();
+        }
+
+        @Override
+        public boolean abortRequested(String runId) {
+            return false;
+        }
+
+        @Override
+        public boolean interruptRequested(String runId) {
+            events.add("interruptRequested:" + runId);
+            return interruptRequestedAfterClear;
+        }
+
+        @Override
+        public void clearInterrupt(String runId) {
+            clearedRunIds.add(runId);
+            events.add("clearInterrupt:" + runId);
+        }
     }
 }

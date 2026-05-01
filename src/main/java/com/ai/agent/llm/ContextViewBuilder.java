@@ -6,6 +6,7 @@ import com.ai.agent.trajectory.TrajectoryReader;
 import com.ai.agent.trajectory.TrajectoryWriter;
 import com.ai.agent.skill.SkillCommandResolution;
 import com.ai.agent.skill.SkillCommandResolver;
+import com.ai.agent.todo.TodoReminderInjector;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.ObjectProvider;
@@ -29,6 +30,7 @@ public final class ContextViewBuilder {
     private final MicroCompactor microCompactor;
     private final SummaryCompactor summaryCompactor;
     private final SkillCommandResolver skillCommandResolver;
+    private final TodoReminderInjector todoReminderInjector;
     private final TrajectoryWriter trajectoryWriter;
     private final ObjectMapper objectMapper;
     private final TokenEstimator tokenEstimator = new TokenEstimator();
@@ -48,6 +50,7 @@ public final class ContextViewBuilder {
                 summaryCompactor,
                 (SkillCommandResolver) null,
                 null,
+                null,
                 null
         );
     }
@@ -60,6 +63,7 @@ public final class ContextViewBuilder {
             MicroCompactor microCompactor,
             SummaryCompactor summaryCompactor,
             ObjectProvider<SkillCommandResolver> skillCommandResolverProvider,
+            ObjectProvider<TodoReminderInjector> todoReminderInjectorProvider,
             ObjectProvider<TrajectoryWriter> trajectoryWriterProvider,
             ObjectMapper objectMapper
     ) {
@@ -70,6 +74,7 @@ public final class ContextViewBuilder {
                 microCompactor,
                 summaryCompactor,
                 skillCommandResolverProvider.getIfAvailable(),
+                todoReminderInjectorProvider.getIfAvailable(),
                 trajectoryWriterProvider.getIfAvailable(),
                 objectMapper
         );
@@ -82,6 +87,7 @@ public final class ContextViewBuilder {
             MicroCompactor microCompactor,
             SummaryCompactor summaryCompactor,
             SkillCommandResolver skillCommandResolver,
+            TodoReminderInjector todoReminderInjector,
             TrajectoryWriter trajectoryWriter,
             ObjectMapper objectMapper
     ) {
@@ -91,8 +97,32 @@ public final class ContextViewBuilder {
         this.microCompactor = microCompactor;
         this.summaryCompactor = summaryCompactor;
         this.skillCommandResolver = skillCommandResolver;
+        this.todoReminderInjector = todoReminderInjector;
         this.trajectoryWriter = trajectoryWriter;
         this.objectMapper = objectMapper;
+    }
+
+    public ContextViewBuilder(
+            TrajectoryReader trajectoryReader,
+            TranscriptPairValidator transcriptPairValidator,
+            LargeResultSpiller largeResultSpiller,
+            MicroCompactor microCompactor,
+            SummaryCompactor summaryCompactor,
+            SkillCommandResolver skillCommandResolver,
+            TrajectoryWriter trajectoryWriter,
+            ObjectMapper objectMapper
+    ) {
+        this(
+                trajectoryReader,
+                transcriptPairValidator,
+                largeResultSpiller,
+                microCompactor,
+                summaryCompactor,
+                skillCommandResolver,
+                null,
+                trajectoryWriter,
+                objectMapper
+        );
     }
 
     public ProviderContextView build(String runId) {
@@ -112,7 +142,7 @@ public final class ContextViewBuilder {
         List<LlmMessage> rawMessages = trajectoryReader.loadMessages(runId);
         transcriptPairValidator.validate(rawMessages);
         List<ContextCompactionDraft> compactions = new ArrayList<>();
-        List<LlmMessage> workingMessages = injectSlashSkills(runId, turnNo, rawMessages);
+        List<LlmMessage> workingMessages = injectTodoReminder(runId, turnNo, injectSlashSkills(runId, turnNo, rawMessages));
 
         List<LlmMessage> providerMessages = collectIfChanged(
                 LARGE_RESULT_SPILL,
@@ -203,6 +233,13 @@ public final class ContextViewBuilder {
         injected.addAll(resolution.messages());
         writeSkillEvents(runId, turnNo, resolution);
         return List.copyOf(injected);
+    }
+
+    private List<LlmMessage> injectTodoReminder(String runId, int turnNo, List<LlmMessage> messages) {
+        if (todoReminderInjector == null) {
+            return messages;
+        }
+        return todoReminderInjector.inject(runId, turnNo, messages);
     }
 
     private void writeSkillEvents(String runId, int turnNo, SkillCommandResolution resolution) {

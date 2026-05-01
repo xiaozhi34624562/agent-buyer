@@ -7,5 +7,6 @@ public enum CancelReason {
     TOOL_TIMEOUT,
     PRECHECK_FAILED,
     EXECUTOR_REJECTED,
-    LEASE_EXPIRED
+    LEASE_EXPIRED,
+    INTERRUPTED
 }

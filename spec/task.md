@@ -137,21 +137,21 @@ Path: /Users/xiaozhi/.codex/skills/java-alibaba-review/SKILL.md
 
 | ID | 任务 | 验收标准 | 状态 | blockedBy |
 |---|---|---|---|---|
-| V22-01 | 多实例配置与本地验证拓扑 | 本地可启动两个 Spring Boot 实例连接同一 MySQL/Redis；请求不依赖 sticky session；README 说明多实例验证方式 | PENDING | V21-GATE |
-| V22-02 | 实现 `ActiveRunSweeper` 职责边界 | Sweeper 只依赖 `RedisToolStore.schedule(runId)`；不依赖 AgentLoop/provider；编译期依赖边界防误调用 | PENDING | V22-01 |
-| V22-03 | 实现 active runs stale cleanup | sweeper 每轮清理 MySQL 已 terminal 超过 60000ms 的 run，从 `agent:active-runs` 主动 `SREM` | PENDING | V22-02 |
-| V22-04 | 实现 `ToolResultPubSub` | complete CAS 成功后 publish result notification；ToolResultWaiter 优先 Pub/Sub；消息 payload 不作为一致性真相源 | PENDING | V22-01 |
-| V22-05 | 实现 Pub/Sub polling fallback | Pub/Sub 丢消息时以 500ms polling Redis terminal state 兜底；测试证明丢通知仍可拿到结果 | PENDING | V22-04 |
-| V22-06 | 实现 `TodoStore` Redis 模型 | `agent:{run:<runId>}:todos`、`todo-reminder` 可保存 step；step 状态支持 `PENDING/IN_PROGRESS/DONE/BLOCKED/CANCELLED` | PENDING | V22-01 |
-| V22-07 | 实现 `ToDoCreateTool` 与 `ToDoWriteTool` | 模型可创建计划并更新 step；ToDo 不作为业务事实源；关键变更写 `agent_event` | PENDING | V22-06 |
-| V22-08 | 实现 `TodoReminderInjector` | 每 3 个 turn 检查未完成 ToDo；注入 transient reminder message；不持久化为对外 user message | PENDING | V22-07 |
-| V22-10 | 实现 interrupt HTTP endpoint | `POST /api/agent/runs/{runId}/interrupt` 校验 run 归属；写独立 `interrupt_requested` control field，与 `abort_requested` 共存；当前 turn 主动结束并返回 `nextActionRequired=user_input` | PENDING | V22-01,V20-04a |
-| V22-11 | 实现 `RunInterruptService` 与工具取消 | interrupt 后不再发起新的 LLM 请求；WAITING tool synthetic cancel；RUNNING tool 收 cancellation token；写操作副作用前检查 token；scheduler、runtime、cancellation token 三处同时检查 `interrupt_requested` 与 `abort_requested` | PENDING | V22-10 |
-| V22-12 | 实现 SubAgent interrupt 级联 | MainAgent interrupt 找到 active child runs 并写 interrupt control；child 返回 `INTERRUPTED_PARTIAL` 或 late result 留在 child trajectory | PENDING | V22-11,V21-12 |
-| V22-13 | 多实例 schedule 并发测试 | 两实例同时 schedule 同一 run 不重复执行工具；safe/exclusive 调度语义保持正确；late complete 不污染 transcript | PENDING | V22-02,V22-05 |
-| V22-14 | V2.2 集成测试与负向测试 | 覆盖 Pub/Sub fallback、active cleanup、ToDo reminder、interrupt PAUSED、SubAgent cascade、multi-instance schedule race | PENDING | V22-08,V22-12,V22-13 |
-| V22-15 | V2.2 文档与演示收口 | README/Postman 增加 interrupt、多实例、ToDo、Pub/Sub fallback 演示；公开说明 SubAgent 同步等待限制仍存在 | PENDING | V22-14 |
-| V22-GATE | V2.2 hardening review gate | `mvn test` 通过；V20、V21 集成测试全部通过；V2.2 review agent 无 P0/P1/P2；多实例 smoke 通过；`progress.md` 记录 V2 完成摘要 | PENDING | V22-15 |
+| V22-01 | 多实例配置与本地验证拓扑 | 本地可启动两个 Spring Boot 实例连接同一 MySQL/Redis；请求不依赖 sticky session；README 说明多实例验证方式 | DONE | V21-GATE |
+| V22-02 | 实现 `ActiveRunSweeper` 职责边界 | Sweeper 只依赖 `RedisToolStore.schedule(runId)`；不依赖 AgentLoop/provider；编译期依赖边界防误调用 | DONE | V22-01 |
+| V22-03 | 实现 active runs stale cleanup | sweeper 每轮清理 MySQL 已 terminal 超过 60000ms 的 run，从 `agent:active-runs` 主动 `SREM` | DONE | V22-02 |
+| V22-04 | 实现 `ToolResultPubSub` | complete CAS 成功后 publish result notification；ToolResultWaiter 优先 Pub/Sub；消息 payload 不作为一致性真相源 | DONE | V22-01 |
+| V22-05 | 实现 Pub/Sub polling fallback | Pub/Sub 丢消息时以 500ms polling Redis terminal state 兜底；测试证明丢通知仍可拿到结果 | DONE | V22-04 |
+| V22-06 | 实现 `TodoStore` Redis 模型 | `agent:{run:<runId>}:todos`、`todo-reminder` 可保存 step；step 状态支持 `PENDING/IN_PROGRESS/DONE/BLOCKED/CANCELLED` | DONE | V22-01 |
+| V22-07 | 实现 `ToDoCreateTool` 与 `ToDoWriteTool` | 模型可创建计划并更新 step；ToDo 不作为业务事实源；关键变更写 `agent_event` | DONE | V22-06 |
+| V22-08 | 实现 `TodoReminderInjector` | 每 3 个 turn 检查未完成 ToDo；注入 transient reminder message；不持久化为对外 user message | DONE | V22-07 |
+| V22-10 | 实现 interrupt HTTP endpoint | `POST /api/agent/runs/{runId}/interrupt` 校验 run 归属；写独立 `interrupt_requested` control field，与 `abort_requested` 共存；active 当前 turn 主动结束并返回 `nextActionRequired=user_input`，terminal run 不返回 continuation action | DONE | V22-01,V20-04a |
+| V22-11 | 实现 `RunInterruptService` 与工具取消 | interrupt 后不再发起新的 LLM 请求；WAITING tool synthetic cancel；RUNNING tool 收 cancellation token；写操作副作用前检查 token；scheduler、runtime、cancellation token 三处同时检查 `interrupt_requested` 与 `abort_requested` | DONE | V22-10 |
+| V22-12 | 实现 SubAgent interrupt 级联 | MainAgent interrupt 找到 active child runs 并写 interrupt control；child 返回 `INTERRUPTED_PARTIAL` 或 late result 留在 child trajectory | DONE | V22-11,V21-12 |
+| V22-13 | 多实例 schedule 并发测试 | 两实例同时 schedule 同一 run 不重复执行工具；safe/exclusive 调度语义保持正确；late complete 不污染 transcript | DONE | V22-02,V22-05 |
+| V22-14 | V2.2 集成测试与负向测试 | 覆盖 Pub/Sub fallback、active cleanup、ToDo reminder、interrupt PAUSED、SubAgent cascade、multi-instance schedule race | DONE | V22-08,V22-12,V22-13 |
+| V22-15 | V2.2 文档与演示收口 | README/Postman 增加 interrupt、多实例、ToDo、Pub/Sub fallback 演示；公开说明 SubAgent 同步等待限制仍存在 | DONE | V22-14 |
+| V22-GATE | V2.2 hardening review gate | `mvn test` 通过；V20、V21 集成测试全部通过；V2.2 review agent 无 P0/P1/P2；多实例 smoke 通过；`progress.md` 记录 V2 完成摘要 | DONE | V22-15 |
 
 ## 任务边界
 

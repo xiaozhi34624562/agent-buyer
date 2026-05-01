@@ -52,6 +52,22 @@ public final class RunStateMachine {
         return transition(runId, RunStatus.RUNNING, RunStatus.PAUSED, reason);
     }
 
+    public TransitionResult interruptIfActive(String runId, String reason) {
+        for (int i = 0; i < MAX_CAS_RETRIES; i++) {
+            RunStatus current = trajectoryStore.findRunStatus(runId);
+            if (isTerminal(current)) {
+                return new TransitionResult(current, false);
+            }
+            if (current == RunStatus.PAUSED) {
+                return new TransitionResult(RunStatus.PAUSED, false);
+            }
+            if (trajectoryStore.transitionRunStatus(runId, current, RunStatus.PAUSED, reason)) {
+                return new TransitionResult(RunStatus.PAUSED, true);
+            }
+        }
+        return new TransitionResult(trajectoryStore.findRunStatus(runId), false);
+    }
+
     public TransitionResult confirmationTimeout(String runId) {
         return transition(
                 runId,

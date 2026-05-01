@@ -310,6 +310,7 @@ class AgentTurnOrchestratorBudgetTest {
                         new SkillPathResolver(skillsRoot),
                         objectMapper
                 ),
+                null,
                 trajectoryStore,
                 objectMapper
         );

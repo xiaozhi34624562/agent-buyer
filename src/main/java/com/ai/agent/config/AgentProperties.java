@@ -22,6 +22,8 @@ public class AgentProperties {
     private Context context = new Context();
     private Skills skills = new Skills();
     private SubAgent subAgent = new SubAgent();
+    private Runtime runtime = new Runtime();
+    private Todo todo = new Todo();
 
     public String getRedisKeyPrefix() {
         return redisKeyPrefix;
@@ -141,6 +143,22 @@ public class AgentProperties {
 
     public void setSubAgent(SubAgent subAgent) {
         this.subAgent = subAgent == null ? new SubAgent() : subAgent;
+    }
+
+    public Runtime getRuntime() {
+        return runtime;
+    }
+
+    public void setRuntime(Runtime runtime) {
+        this.runtime = runtime == null ? new Runtime() : runtime;
+    }
+
+    public Todo getTodo() {
+        return todo;
+    }
+
+    public void setTodo(Todo todo) {
+        this.todo = todo == null ? new Todo() : todo;
     }
 
     public static class AgentLoop {
@@ -665,6 +683,75 @@ public class AgentProperties {
 
         public void setSpawnSystemPromptHint(String spawnSystemPromptHint) {
             this.spawnSystemPromptHint = spawnSystemPromptHint;
+        }
+    }
+
+    public static class Runtime {
+        private boolean activeRunSweeperEnabled = true;
+        private long activeRunSweeperIntervalMs = 2_000;
+        private long activeRunStaleCleanupMs = 60_000;
+        private boolean toolResultPubsubEnabled = true;
+        private long toolResultPollIntervalMs = 500;
+        private boolean interruptEnabled = true;
+
+        public boolean isActiveRunSweeperEnabled() {
+            return activeRunSweeperEnabled;
+        }
+
+        public void setActiveRunSweeperEnabled(boolean activeRunSweeperEnabled) {
+            this.activeRunSweeperEnabled = activeRunSweeperEnabled;
+        }
+
+        public long getActiveRunSweeperIntervalMs() {
+            return activeRunSweeperIntervalMs;
+        }
+
+        public void setActiveRunSweeperIntervalMs(long activeRunSweeperIntervalMs) {
+            this.activeRunSweeperIntervalMs = activeRunSweeperIntervalMs;
+        }
+
+        public long getActiveRunStaleCleanupMs() {
+            return activeRunStaleCleanupMs;
+        }
+
+        public void setActiveRunStaleCleanupMs(long activeRunStaleCleanupMs) {
+            this.activeRunStaleCleanupMs = activeRunStaleCleanupMs;
+        }
+
+        public boolean isToolResultPubsubEnabled() {
+            return toolResultPubsubEnabled;
+        }
+
+        public void setToolResultPubsubEnabled(boolean toolResultPubsubEnabled) {
+            this.toolResultPubsubEnabled = toolResultPubsubEnabled;
+        }
+
+        public long getToolResultPollIntervalMs() {
+            return toolResultPollIntervalMs;
+        }
+
+        public void setToolResultPollIntervalMs(long toolResultPollIntervalMs) {
+            this.toolResultPollIntervalMs = toolResultPollIntervalMs;
+        }
+
+        public boolean isInterruptEnabled() {
+            return interruptEnabled;
+        }
+
+        public void setInterruptEnabled(boolean interruptEnabled) {
+            this.interruptEnabled = interruptEnabled;
+        }
+    }
+
+    public static class Todo {
+        private int reminderTurnInterval = 3;
+
+        public int getReminderTurnInterval() {
+            return reminderTurnInterval;
+        }
+
+        public void setReminderTurnInterval(int reminderTurnInterval) {
+            this.reminderTurnInterval = reminderTurnInterval;
         }
     }
 

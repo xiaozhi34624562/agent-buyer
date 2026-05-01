@@ -798,22 +798,88 @@ V2.1 必须在 `V20-GATE` 完成后启动。下列条目仅作为占位，待 V2
 
 V2.2 必须在 `V21-GATE` 完成后启动。占位列表：
 
-- `V22-01` PENDING — 多实例配置。
-- `V22-02` PENDING — ActiveRunSweeper 职责边界。
-- `V22-03` PENDING — active runs stale cleanup。
-- `V22-04` PENDING — ToolResultPubSub。
-- `V22-05` PENDING — Pub/Sub polling fallback。
-- `V22-06` PENDING — TodoStore Redis 模型。
-- `V22-07` PENDING — ToDoCreateTool / ToDoWriteTool。
-- `V22-08` PENDING — TodoReminderInjector。
+- `V22-01` DONE — 多实例配置。
+- `V22-02` DONE — ActiveRunSweeper 职责边界。
+- `V22-03` DONE — active runs stale cleanup。
+- `V22-04` DONE — ToolResultPubSub。
+- `V22-05` DONE — Pub/Sub polling fallback。
+- `V22-06` DONE — TodoStore Redis 模型。
+- `V22-07` DONE — ToDoCreateTool / ToDoWriteTool。
+- `V22-08` DONE — TodoReminderInjector。
 - （`V22-09` 序号空缺，PAUSED state machine 已合并到 `V20-04a`）
-- `V22-10` PENDING — interrupt HTTP endpoint。
-- `V22-11` PENDING — RunInterruptService + 工具取消。
-- `V22-12` PENDING — SubAgent interrupt 级联。
-- `V22-13` PENDING — 多实例 schedule 并发测试。
-- `V22-14` PENDING — V2.2 集成 / 负向测试。
-- `V22-15` PENDING — V2.2 文档收口。
-- `V22-GATE` PENDING — V2.2 hardening review gate。
+- `V22-10` DONE — interrupt HTTP endpoint。
+- `V22-11` DONE — RunInterruptService + 工具取消。
+- `V22-12` DONE — SubAgent interrupt 级联。
+- `V22-13` DONE — 多实例 schedule 并发测试。
+- `V22-14` DONE — V2.2 集成 / 负向测试。
+- `V22-15` DONE — V2.2 文档收口。
+- `V22-GATE` DONE — V2.2 hardening review gate。
+
+### V2.2 启动记录
+
+- 启动时间：2026-05-02 02:18 CST。
+- 前置条件：`V21-GATE` 已通过，`MYSQL_PASSWORD=*** mvn test` 211 tests 通过，review agent 无 P0/P1/P2。
+- 主 agent 写入范围：多实例 runtime、active runs sweeper、ToolResult Pub/Sub、interrupt control / endpoint / cascade、集成测试、文档与任务状态。
+- sub agent 分工：ToDo 子任务（`TodoStore`、`ToDoCreateTool`、`ToDoWriteTool`、`TodoReminderInjector`）限定在 `todo` 包和对应测试，主 agent 后续负责配置与 ContextViewBuilder 集成。
+- 设计约束：
+  - `ActiveRunSweeper` 不允许依赖 AgentLoop 或 LLM provider；Redis Lua 负责 lease 去重，JVM 只执行已拿到 lease 的工具。
+  - Pub/Sub 只是延迟优化，terminal 真相仍来自 Redis HASH / MySQL trajectory。
+  - interrupt 与 abort 是两个独立 control signal；interrupt 目标是当前 turn -> `PAUSED`，不是整个 run -> `CANCELLED`。
+
+### V2.2 实现记录
+
+- 完成状态：`V22-01` 到 `V22-15` 已完成，`V22-GATE` 已通过。
+- 多实例运行态：
+  - 新增 `ActiveRunSweeper`，每个实例扫描 `agent:active-runs`，只推动 Redis 中已存在的 WAITING tool，不调用 `AgentLoop` 或 provider。
+  - terminal run 超过 `active-run-stale-cleanup-ms=60000` 后主动从 active set 清理。
+  - `ToolExecutionLauncher` 从 `RedisToolRuntime` 抽出，供 stream ingest 和 sweeper 复用，避免 sweeper 触碰上层 agent loop。
+- Tool result 唤醒：
+  - 新增 `ToolResultPubSub`，terminal close 后 publish `{runId, toolCallId}`。
+  - `ToolResultWaiter` 优先等待 Pub/Sub，本质真相仍从 Redis terminal state 读取；通知丢失时 500ms polling 兜底。
+- ToDo：
+  - 新增 Redis `TodoStore`、`todo_create`、`todo_write` 和 `TodoReminderInjector`。
+  - reminder 作为 transient `USER` message 注入 provider view，不写回对外 conversation。这里没有使用 `SYSTEM`，避免 OpenAI-compatible provider 对多 system message 的兼容风险。
+- Interrupt：
+  - 新增 `POST /api/agent/runs/{runId}/interrupt`。
+  - Redis control 使用独立 `interrupt_requested`，与 `abort_requested` 共存。
+  - WAITING tool 被 synthetic cancel 为 `INTERRUPTED`；scheduler、runtime cancellation token、complete CAS 均检查 abort/interrupt。
+  - MainAgent interrupt 会级联 active child run，child `parentLinkStatus=DETACHED_BY_INTERRUPT`，`AgentTool` 返回 `INTERRUPTED_PARTIAL`。
+- 开发中踩坑：
+  - `AgentRunApplicationService`、`TodoReminderInjector`、`ToolResultWaiter` 为测试保留兼容构造函数后，Spring 无法自动选择生产构造函数。修复方式：生产构造函数显式加 `@Autowired`。
+  - interrupt 后再 ingest 的 tool 不能复用 `RUN_ABORTED` cancel reason；Lua ingest 分支已区分 abort 与 interrupt，避免诊断语义混淆。
+- 验证：
+  - `MYSQL_PASSWORD=*** mvn -Dtest='com.ai.agent.tool.ActiveRunSweeperTest,com.ai.agent.tool.ToolResultWaiterTest,com.ai.agent.api.RunInterruptServiceTest,com.ai.agent.todo.TodoStoreTest,com.ai.agent.todo.TodoToolsTest,com.ai.agent.todo.TodoReminderInjectorTest,com.ai.agent.llm.ContextViewBuilderTest,com.ai.agent.subagent.DefaultSubAgentRunnerTest' test`：32 tests 通过。
+  - `MYSQL_PASSWORD=*** mvn -Dtest='com.ai.agent.RedisToolStoreIntegrationTest' test`：10 tests 通过。
+  - `MYSQL_PASSWORD=*** mvn test`：232 tests 通过。
+
+### V22 hardening review 修复与 gate 收口
+
+- 时间：2026-05-02 02:55 CST。
+- 第一轮 `java-alibaba-review` 发现并推动修复的主要问题：
+  - `PAUSED` continuation 会清理旧 `interrupt_requested`，但如果用户在 clear 与 `PAUSED -> RUNNING` CAS 之间再次 interrupt，存在新 interrupt 被 continuation 穿透的竞态。
+  - running idempotent tool 在 interrupt 后可能无法进入 terminal，late complete 处理语义不清。
+  - `ToolResultWaiter` 在部分 future 已完成但 Redis terminal 还没就绪时可能形成高频轮询。
+  - terminal run interrupt 不应返回 `nextActionRequired=user_input`，也不应写新的 Redis control。
+  - `TodoStore.replacePlan` 需要 Lua 原子替换，避免多实例读到半截 plan。
+- 修复：
+  - `RunAccessManager` 在 `PAUSED -> RUNNING` CAS 成功后再次检查 Redis `interrupt_requested`；若发现新 interrupt，立即 `RUNNING -> PAUSED` 并拒绝 continuation，确保并发 interrupt fail closed。
+  - `RunInterruptService` 先读取 MySQL run status；terminal run 返回 `changed=false` 且 `nextActionRequired=null`，active run 才写 interrupt control、关闭 tool terminal、级联 child。
+  - `LuaRedisToolStore.interrupt` 取消 WAITING 与 RUNNING idempotent tool；`complete` CAS 在 abort/interrupt 后拒绝 late success；`clearInterrupt` 用于 `PAUSED` continuation 恢复。
+  - `ToolResultWaiter` 只等待当前缺失 terminal 的 notification，避免已完成 future 导致 busy polling；notification 失败路径明确恢复线程 interrupt 状态。
+  - `RedisTodoStore.replacePlan` 改为 Lua `DEL + HSET` 原子替换；ToDo tools 在写 Redis 前检查 cancellation token，并发出 progress 事件。
+- 新增/补强测试：
+  - `RunAccessManagerTest.acquireContinuationClearsPausedInterruptBeforeStartingRun`。
+  - `RunAccessManagerTest.acquireContinuationKeepsPausedWhenNewInterruptArrivesAfterClear`。
+  - `RedisToolStoreIntegrationTest.clearingInterruptAllowsPausedRunContinuationToScheduleNewTools`。
+  - `RedisToolStoreIntegrationTest.interruptCancelsRunningIdempotentToolAndRejectsLateSuccessComplete`。
+  - `RunInterruptServiceTest.interruptTerminalRunDoesNotSetControlOrAskForContinuation`。
+  - `ToolResultWaiterTest.completedNotificationDoesNotCauseBusyPollingWhenTerminalIsNotReadyYet`。
+- 验证：
+  - `MYSQL_PASSWORD=*** mvn -Dtest='com.ai.agent.RunAccessManagerTest,com.ai.agent.api.RunInterruptServiceTest,com.ai.agent.RedisToolStoreIntegrationTest,com.ai.agent.tool.ToolResultWaiterTest,com.ai.agent.todo.TodoStoreTest,com.ai.agent.todo.TodoToolsTest' test`：39 tests，0 failures，0 errors。
+  - `MYSQL_PASSWORD=*** mvn test`：232 tests，0 failures，0 errors。
+  - Postman collection JSON parse 通过。
+- V22-GATE re-review：未发现 P0/P1/P2；V2.2 hardening gate 放行。
+- 状态：`V22-01` ~ `V22-15` 与 `V22-GATE` 均置为 DONE。V2.0、V2.1、V2.2 全部完成。
 
 ## V2 踩坑记录
 

@@ -24,7 +24,21 @@ public interface RedisToolStore {
 
     Set<String> activeRunIds();
 
+    default void removeActiveRun(String runId) {
+    }
+
     List<ToolTerminal> abort(String runId, String reason);
 
+    default List<ToolTerminal> interrupt(String runId, String reason) {
+        return List.of();
+    }
+
     boolean abortRequested(String runId);
+
+    default boolean interruptRequested(String runId) {
+        return false;
+    }
+
+    default void clearInterrupt(String runId) {
+    }
 }

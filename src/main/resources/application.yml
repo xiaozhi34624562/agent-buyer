@@ -34,6 +34,8 @@ agent:
     - skill_list
     - skill_view
     - agent_tool
+    - todo_create
+    - todo_write
   max-parallel: 6
   max-scan: 256
   lease-ms: 90000
@@ -91,3 +93,12 @@ agent:
     executor-core-pool-size: 2
     executor-max-pool-size: 8
     executor-queue-capacity: 64
+  todo:
+    reminder-turn-interval: 3
+  runtime:
+    active-run-sweeper-enabled: true
+    active-run-sweeper-interval-ms: 2000
+    active-run-stale-cleanup-ms: 60000
+    tool-result-pubsub-enabled: true
+    tool-result-poll-interval-ms: 500
+    interrupt-enabled: true

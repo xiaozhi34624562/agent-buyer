@@ -166,7 +166,7 @@ public final class AgentTool extends AbstractTool {
             return "SUBAGENT_WAIT_TIMEOUT";
         }
         if (status == RunStatus.PAUSED) {
-            return "SUBAGENT_PAUSED";
+            return "INTERRUPTED_PARTIAL";
         }
         if (status == RunStatus.CANCELLED) {
             return "SUBAGENT_CANCELLED";

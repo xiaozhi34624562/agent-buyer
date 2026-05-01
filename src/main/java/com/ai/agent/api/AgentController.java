@@ -82,6 +82,14 @@ public class AgentController {
         return applicationService.abortRun(requiredUserId(userId), runId);
     }
 
+    @PostMapping("/runs/{runId}/interrupt")
+    public RunInterruptService.InterruptRunResponse interruptRun(
+            @RequestHeader("X-User-Id") String userId,
+            @PathVariable String runId
+    ) {
+        return applicationService.interruptRun(requiredUserId(userId), runId);
+    }
+
     private String requiredUserId(String userId) {
         if (userId == null || userId.isBlank()) {
             throw new AuthenticationRequiredException();
@@ -154,6 +162,12 @@ public class AgentController {
     public ResponseEntity<Map<String, String>> unavailable() {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(Map.of("message", "agent is shutting down"));
+    }
+
+    @org.springframework.web.bind.annotation.ExceptionHandler(RunInterruptService.InterruptDisabledException.class)
+    public ResponseEntity<Map<String, String>> interruptDisabled() {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(Map.of("message", "run interrupt is disabled"));
     }
 
     @org.springframework.web.bind.annotation.ExceptionHandler(AgentRequestPolicy.InvalidAgentRequestException.class)

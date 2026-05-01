@@ -11,6 +11,7 @@ import com.ai.agent.trajectory.RunContext;
 import com.ai.agent.trajectory.RunContextStore;
 import com.ai.agent.trajectory.TrajectoryReader;
 import com.ai.agent.trajectory.TrajectoryStore;
+import com.ai.agent.tool.redis.RedisToolStore;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -313,6 +314,43 @@ class DefaultSubAgentRunnerTest {
         fixture.close();
     }
 
+    @Test
+    void parentInterruptPausesChildRunAndInterruptsChildTools() throws Exception {
+        Fixture fixture = new Fixture();
+        fixture.properties.getSubAgent().setWaitTimeoutMs(1_000);
+        AtomicBoolean cancelled = new AtomicBoolean(false);
+        when(fixture.redisToolStore.interruptRequested("parent-run-1")).thenReturn(true);
+        when(fixture.childRunRegistry.reserve(any()))
+                .thenReturn(ReserveChildResult.accepted("parent-run-1", "child-run-1"));
+        when(fixture.trajectoryStore.createChildRun(anyString(), anyString(), anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(new ChildRunCreation("child-run-1", true));
+        when(fixture.turnOrchestrator.runSubAgentUntilStop(anyString(), anyString(), anyString(), any(), eq(null), any()))
+                .thenAnswer(invocation -> {
+                    cancelled.set(true);
+                    Thread.sleep(500);
+                    return new AgentRunResult("child-run-1", RunStatus.SUCCEEDED, "late");
+                });
+
+        SubAgentResult result = fixture.runner.run(task(), cancelled::get);
+
+        assertThat(result.status()).isEqualTo(RunStatus.PAUSED);
+        assertThat(result.partial()).isTrue();
+        verify(fixture.toolCallCoordinator).interruptRunTools(
+                eq("child-run-1"),
+                eq("parent_interrupted"),
+                any()
+        );
+        verify(fixture.trajectoryStore).updateRunStatus("child-run-1", RunStatus.PAUSED, "parent interrupted");
+        verify(fixture.trajectoryStore).updateParentLinkStatus("child-run-1", ParentLinkStatus.DETACHED_BY_INTERRUPT.name());
+        verify(fixture.childRunRegistry).release(
+                "parent-run-1",
+                "child-run-1",
+                ChildReleaseReason.INTERRUPTED,
+                ParentLinkStatus.DETACHED_BY_INTERRUPT
+        );
+        fixture.close();
+    }
+
     private SubAgentTask task() {
         return new SubAgentTask(
                 "parent-run-1",
@@ -334,6 +372,7 @@ class DefaultSubAgentRunnerTest {
         private final RunContextStore runContextStore = mock(RunContextStore.class);
         private final AgentTurnOrchestrator turnOrchestrator = mock(AgentTurnOrchestrator.class);
         private final ToolCallCoordinator toolCallCoordinator = mock(ToolCallCoordinator.class);
+        private final RedisToolStore redisToolStore = mock(RedisToolStore.class);
         private final ExecutorService executor;
         private final DefaultSubAgentRunner runner;
         private RunContext createdChildContext;
@@ -363,6 +402,7 @@ class DefaultSubAgentRunnerTest {
                     runContextStore,
                     turnOrchestrator,
                     toolCallCoordinator,
+                    redisToolStore,
                     executor
             );
         }

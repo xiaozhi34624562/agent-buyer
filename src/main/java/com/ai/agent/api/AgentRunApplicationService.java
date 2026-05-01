@@ -7,6 +7,7 @@ import com.ai.agent.trajectory.TrajectoryQueryService;
 import com.ai.agent.trajectory.dto.AgentRunTrajectoryDto;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -22,6 +23,32 @@ public final class AgentRunApplicationService {
     private final RedisToolStore redisToolStore;
     private final ToolResultCloser toolResultCloser;
     private final TrajectoryQueryService trajectoryQueryService;
+    private final RunInterruptService interruptService;
+
+    @Autowired
+    public AgentRunApplicationService(
+            AgentLoop agentLoop,
+            RunAdmissionController admissionController,
+            RedisRateLimiter rateLimiter,
+            AgentRequestPolicy requestPolicy,
+            RunAccessManager runAccessManager,
+            ContinuationLockService continuationLockService,
+            RedisToolStore redisToolStore,
+            ToolResultCloser toolResultCloser,
+            TrajectoryQueryService trajectoryQueryService,
+            RunInterruptService interruptService
+    ) {
+        this.agentLoop = agentLoop;
+        this.admissionController = admissionController;
+        this.rateLimiter = rateLimiter;
+        this.requestPolicy = requestPolicy;
+        this.runAccessManager = runAccessManager;
+        this.continuationLockService = continuationLockService;
+        this.redisToolStore = redisToolStore;
+        this.toolResultCloser = toolResultCloser;
+        this.trajectoryQueryService = trajectoryQueryService;
+        this.interruptService = interruptService;
+    }
 
     public AgentRunApplicationService(
             AgentLoop agentLoop,
@@ -34,15 +61,18 @@ public final class AgentRunApplicationService {
             ToolResultCloser toolResultCloser,
             TrajectoryQueryService trajectoryQueryService
     ) {
-        this.agentLoop = agentLoop;
-        this.admissionController = admissionController;
-        this.rateLimiter = rateLimiter;
-        this.requestPolicy = requestPolicy;
-        this.runAccessManager = runAccessManager;
-        this.continuationLockService = continuationLockService;
-        this.redisToolStore = redisToolStore;
-        this.toolResultCloser = toolResultCloser;
-        this.trajectoryQueryService = trajectoryQueryService;
+        this(
+                agentLoop,
+                admissionController,
+                rateLimiter,
+                requestPolicy,
+                runAccessManager,
+                continuationLockService,
+                redisToolStore,
+                toolResultCloser,
+                trajectoryQueryService,
+                null
+        );
     }
 
     public RunStreamPlan createRun(String userId, AgentRunRequest request) {
@@ -89,6 +119,14 @@ public final class AgentRunApplicationService {
             continuationLockService.releaseRun(runId);
         }
         return new AbortRunResponse(runId, abort.status(), abort.changed());
+    }
+
+    public RunInterruptService.InterruptRunResponse interruptRun(String userId, String runId) {
+        if (interruptService == null) {
+            throw new ServiceUnavailableException();
+        }
+        log.info("agent interrupt requested runId={} userId={}", runId, userId);
+        return interruptService.interrupt(userId, runId);
     }
 
     @FunctionalInterface
