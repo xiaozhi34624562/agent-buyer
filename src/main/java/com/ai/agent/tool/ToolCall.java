@@ -9,6 +9,7 @@ public record ToolCall(
         String toolName,
         String argsJson,
         boolean isConcurrent,
+        boolean idempotent,
         boolean precheckFailed,
         String precheckErrorJson
 ) {

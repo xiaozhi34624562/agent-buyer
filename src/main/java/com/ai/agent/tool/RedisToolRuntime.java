@@ -36,10 +36,10 @@ public final class RedisToolRuntime implements ToolRuntime {
         if (!call.precheckFailed()) {
             store.ingestWaiting(runId, call);
         }
-        drain(runId);
+        drainRun(runId);
     }
 
-    private void drain(String runId) {
+    public void drainRun(String runId) {
         List<StartedTool> started = store.schedule(runId);
         for (StartedTool tool : started) {
             try {
@@ -77,7 +77,7 @@ public final class RedisToolRuntime implements ToolRuntime {
         if (completed) {
             trajectoryStore.writeToolResult(started.call().runId(), started.call().toolUseId(), terminal);
         }
-        drain(started.call().runId());
+        drainRun(started.call().runId());
     }
 
     private String escape(String value) {

@@ -11,6 +11,7 @@ public class AgentProperties {
     private int maxScan = 256;
     private long leaseMs = 90_000;
     private Duration confirmationTtl = Duration.ofMinutes(10);
+    private Reaper reaper = new Reaper();
     private AgentLoop agentLoop = new AgentLoop();
     private Executor executor = new Executor();
     private Llm llm = new Llm();
@@ -54,6 +55,14 @@ public class AgentProperties {
 
     public void setConfirmationTtl(Duration confirmationTtl) {
         this.confirmationTtl = confirmationTtl;
+    }
+
+    public Reaper getReaper() {
+        return reaper;
+    }
+
+    public void setReaper(Reaper reaper) {
+        this.reaper = reaper;
     }
 
     public AgentLoop getAgentLoop() {
@@ -124,6 +133,27 @@ public class AgentProperties {
 
         public void setHardTokenCap(int hardTokenCap) {
             this.hardTokenCap = hardTokenCap;
+        }
+    }
+
+    public static class Reaper {
+        private boolean enabled = true;
+        private long intervalMs = 10_000;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public long getIntervalMs() {
+            return intervalMs;
+        }
+
+        public void setIntervalMs(long intervalMs) {
+            this.intervalMs = intervalMs;
         }
     }
 

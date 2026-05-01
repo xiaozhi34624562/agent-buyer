@@ -32,6 +32,10 @@ public final class ContinuationLockService {
         }
     }
 
+    public void releaseRun(String runId) {
+        redisTemplate.delete(redisKeys.continuationLock(runId));
+    }
+
     public record Lock(String runId, String value) {
     }
 }

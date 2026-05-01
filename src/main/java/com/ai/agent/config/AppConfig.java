@@ -14,6 +14,8 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.lang.management.ManagementFactory;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 
 @Configuration
@@ -56,6 +58,17 @@ public class AppConfig {
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
         executor.initialize();
         return executor.getThreadPoolExecutor();
+    }
+
+    @Bean
+    @Qualifier("sseScheduler")
+    ScheduledExecutorService sseScheduler() {
+        return Executors.newScheduledThreadPool(2, runnable -> {
+            Thread thread = new Thread(runnable);
+            thread.setName("sse-ping-" + thread.threadId());
+            thread.setDaemon(true);
+            return thread;
+        });
     }
 
     @Bean

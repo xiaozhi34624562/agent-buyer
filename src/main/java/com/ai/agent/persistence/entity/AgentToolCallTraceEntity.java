@@ -19,6 +19,7 @@ public class AgentToolCallTraceEntity {
     private String argsJson;
     @TableField("is_concurrent")
     private Boolean concurrent;
+    private Boolean idempotent;
     private Boolean precheckFailed;
     private String precheckErrorJson;
     private LocalDateTime createdAt;
@@ -93,6 +94,14 @@ public class AgentToolCallTraceEntity {
 
     public void setConcurrent(Boolean concurrent) {
         this.concurrent = concurrent;
+    }
+
+    public Boolean getIdempotent() {
+        return idempotent;
+    }
+
+    public void setIdempotent(Boolean idempotent) {
+        this.idempotent = idempotent;
     }
 
     public Boolean getPrecheckFailed() {

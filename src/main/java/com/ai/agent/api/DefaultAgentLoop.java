@@ -23,6 +23,7 @@ import com.ai.agent.tool.ToolTerminal;
 import com.ai.agent.tool.ToolUse;
 import com.ai.agent.tool.ToolUseContext;
 import com.ai.agent.tool.ToolValidation;
+import com.ai.agent.tool.redis.RedisToolStore;
 import com.ai.agent.trajectory.TrajectoryStore;
 import com.ai.agent.util.Ids;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -47,6 +48,7 @@ public final class DefaultAgentLoop implements AgentLoop {
     private final TranscriptPairValidator transcriptPairValidator;
     private final ToolRegistry toolRegistry;
     private final ToolRuntime toolRuntime;
+    private final RedisToolStore redisToolStore;
     private final ToolResultWaiter toolResultWaiter;
     private final TrajectoryStore trajectoryStore;
     private final RunEventSinkRegistry sinkRegistry;
@@ -60,6 +62,7 @@ public final class DefaultAgentLoop implements AgentLoop {
             TranscriptPairValidator transcriptPairValidator,
             ToolRegistry toolRegistry,
             ToolRuntime toolRuntime,
+            RedisToolStore redisToolStore,
             ToolResultWaiter toolResultWaiter,
             TrajectoryStore trajectoryStore,
             RunEventSinkRegistry sinkRegistry,
@@ -72,6 +75,7 @@ public final class DefaultAgentLoop implements AgentLoop {
         this.transcriptPairValidator = transcriptPairValidator;
         this.toolRegistry = toolRegistry;
         this.toolRuntime = toolRuntime;
+        this.redisToolStore = redisToolStore;
         this.toolResultWaiter = toolResultWaiter;
         this.trajectoryStore = trajectoryStore;
         this.sinkRegistry = sinkRegistry;
@@ -137,6 +141,7 @@ public final class DefaultAgentLoop implements AgentLoop {
 
         for (int i = 0; i < maxTurns; i++) {
             if (Instant.now().isAfter(deadline)) {
+                redisToolStore.abort(runId, "run_wallclock_timeout");
                 trajectoryStore.updateRunStatus(runId, RunStatus.TIMEOUT, "run wallclock timeout");
                 sink.onError(new ErrorEvent(runId, "run timeout"));
                 return new AgentRunResult(runId, RunStatus.TIMEOUT, null);
@@ -224,13 +229,21 @@ public final class DefaultAgentLoop implements AgentLoop {
                 toolRuntime.onToolUse(runId, valid);
             }
 
-            List<ToolTerminal> terminals = commit.executableCalls().isEmpty()
-                    ? List.of()
-                    : toolResultWaiter.awaitResults(
-                    runId,
-                    commit.executableCalls(),
-                    Duration.ofMillis(properties.getAgentLoop().getToolResultTimeoutMs())
-            );
+            List<ToolTerminal> terminals;
+            try {
+                terminals = commit.executableCalls().isEmpty()
+                        ? List.of()
+                        : toolResultWaiter.awaitResults(
+                        runId,
+                        commit.executableCalls(),
+                        Duration.ofMillis(properties.getAgentLoop().getToolResultTimeoutMs())
+                );
+            } catch (Exception e) {
+                redisToolStore.abort(runId, "tool_result_timeout");
+                trajectoryStore.updateRunStatus(runId, RunStatus.TIMEOUT, "tool result timeout");
+                sink.onError(new ErrorEvent(runId, "tool result timeout"));
+                return new AgentRunResult(runId, RunStatus.TIMEOUT, null);
+            }
             Map<String, ToolCall> callsById = commit.allCalls().stream()
                     .collect(Collectors.toMap(ToolCall::toolCallId, Function.identity()));
             for (ToolTerminal terminal : terminals) {
@@ -254,6 +267,7 @@ public final class DefaultAgentLoop implements AgentLoop {
         }
 
         trajectoryStore.updateRunStatus(runId, RunStatus.FAILED, "max turns exceeded");
+        redisToolStore.abort(runId, "max_turns_exceeded");
         sink.onError(new ErrorEvent(runId, "max turns exceeded"));
         return new AgentRunResult(runId, RunStatus.FAILED, null);
     }
@@ -280,6 +294,7 @@ public final class DefaultAgentLoop implements AgentLoop {
                             tool.schema().name(),
                             validation.normalizedArgsJson(),
                             tool.schema().isConcurrent(),
+                            tool.schema().idempotent(),
                             false,
                             null
                     );
@@ -295,6 +310,7 @@ public final class DefaultAgentLoop implements AgentLoop {
                             tool.schema().name(),
                             raw.argsJson(),
                             tool.schema().isConcurrent(),
+                            tool.schema().idempotent(),
                             true,
                             validation.errorJson()
                     );
@@ -310,6 +326,7 @@ public final class DefaultAgentLoop implements AgentLoop {
                         raw.name(),
                         raw.name(),
                         raw.argsJson(),
+                        false,
                         false,
                         true,
                         errorJson("unknown_or_invalid_tool", e.getMessage())

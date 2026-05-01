@@ -32,6 +32,9 @@ agent:
   max-scan: 256
   lease-ms: 90000
   confirmation-ttl: 10m
+  reaper:
+    enabled: true
+    interval-ms: 10000
   agent-loop:
     max-turns: 10
     tool-result-timeout-ms: 90000

@@ -210,6 +210,7 @@ public class MybatisTrajectoryStore implements TrajectoryStore {
         entity.setToolName(call.toolName());
         entity.setArgsJson(call.argsJson());
         entity.setConcurrent(call.isConcurrent());
+        entity.setIdempotent(call.idempotent());
         entity.setPrecheckFailed(call.precheckFailed());
         entity.setPrecheckErrorJson(call.precheckErrorJson());
         return entity;
@@ -225,6 +226,7 @@ public class MybatisTrajectoryStore implements TrajectoryStore {
                 entity.getToolName(),
                 entity.getArgsJson(),
                 Boolean.TRUE.equals(entity.getConcurrent()),
+                Boolean.TRUE.equals(entity.getIdempotent()),
                 Boolean.TRUE.equals(entity.getPrecheckFailed()),
                 entity.getPrecheckErrorJson()
         );

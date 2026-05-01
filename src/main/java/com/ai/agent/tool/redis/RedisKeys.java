@@ -35,6 +35,10 @@ public final class RedisKeys {
         return base(runId) + ":continuation-lock";
     }
 
+    public String activeRuns() {
+        return properties.getRedisKeyPrefix() + ":active-runs";
+    }
+
     private String base(String runId) {
         return properties.getRedisKeyPrefix() + ":{run:" + runId + "}";
     }

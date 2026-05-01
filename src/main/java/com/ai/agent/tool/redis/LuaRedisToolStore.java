@@ -17,6 +17,7 @@ import org.springframework.stereotype.Repository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @Repository
 public class LuaRedisToolStore implements RedisToolStore {
@@ -124,6 +125,46 @@ public class LuaRedisToolStore implements RedisToolStore {
             return 1
             """;
 
+    private static final String REAP_EXPIRED_LEASES_SCRIPT = """
+            local ids = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
+            local terminals = {}
+            for _, id in ipairs(ids) do
+              local raw = redis.call('HGET', KEYS[2], id)
+              if raw then
+                local state = cjson.decode(raw)
+                local leaseUntil = tonumber(state['leaseUntil'] or '0')
+                if state['status'] == 'RUNNING' and leaseUntil <= tonumber(ARGV[1]) then
+                  redis.call('ZREM', KEYS[1], id)
+                  if state['call']['idempotent'] == true then
+                    state['status'] = 'WAITING'
+                    state['leaseToken'] = cjson.null
+                    state['leaseUntil'] = cjson.null
+                    state['workerId'] = cjson.null
+                    redis.call('HSET', KEYS[2], id, cjson.encode(state))
+                  else
+                    state['status'] = 'CANCELLED'
+                    state['cancelReason'] = 'TOOL_TIMEOUT'
+                    state['errorJson'] = ARGV[2]
+                    redis.call('HSET', KEYS[2], id, cjson.encode(state))
+                    table.insert(terminals, cjson.encode({
+                      toolCallId = id,
+                      status = 'CANCELLED',
+                      resultJson = cjson.null,
+                      errorJson = ARGV[2],
+                      cancelReason = 'TOOL_TIMEOUT',
+                      synthetic = true
+                    }))
+                  end
+                else
+                  redis.call('ZREM', KEYS[1], id)
+                end
+              else
+                redis.call('ZREM', KEYS[1], id)
+              end
+            end
+            return terminals
+            """;
+
     private static final String CANCEL_WAITING_SCRIPT = """
             local ids = redis.call('ZRANGE', KEYS[1], 0, -1)
             local terminals = {}
@@ -191,7 +232,11 @@ public class LuaRedisToolStore implements RedisToolStore {
                 Long.toString(call.seq()),
                 toJson(state)
         );
-        return result != null && result == 1L;
+        boolean ingested = result != null && result == 1L;
+        if (ingested) {
+            redisTemplate.opsForSet().add(keys.activeRuns(), runId);
+        }
+        return ingested;
     }
 
     @Override
@@ -235,6 +280,20 @@ public class LuaRedisToolStore implements RedisToolStore {
     }
 
     @Override
+    public List<ToolTerminal> reapExpiredLeases(String runId, long nowMillis) {
+        List<String> terminals = redisTemplate.execute(
+                new DefaultRedisScript<>(REAP_EXPIRED_LEASES_SCRIPT, List.class),
+                List.of(keys.leases(runId), keys.tools(runId)),
+                Long.toString(nowMillis),
+                "{\"type\":\"tool_timeout\",\"message\":\"tool lease expired\"}"
+        );
+        if (terminals == null) {
+            return List.of();
+        }
+        return terminals.stream().map(this::readTerminal).toList();
+    }
+
+    @Override
     public List<ToolTerminal> cancelWaiting(String runId, CancelReason reason) {
         List<String> terminals = redisTemplate.execute(
                 new DefaultRedisScript<>(CANCEL_WAITING_SCRIPT, List.class),
@@ -266,6 +325,12 @@ public class LuaRedisToolStore implements RedisToolStore {
                 state.cancelReason(),
                 false
         ));
+    }
+
+    @Override
+    public Set<String> activeRunIds() {
+        Set<String> runIds = redisTemplate.opsForSet().members(keys.activeRuns());
+        return runIds == null ? Set.of() : runIds;
     }
 
     @Override
