@@ -900,6 +900,30 @@ V2.2 必须在 `V21-GATE` 完成后启动。占位列表：
   - `MYSQL_PASSWORD=*** DEEPSEEK_API_KEY=*** QWEN_API_KEY=*** ./scripts/real-llm-e2e.sh`：通过。
   - 本次通过产物：`/tmp/agent-buyer-real-llm-e2e/20260502-052446`。
 
+### Real LLM E2E 全量套件重置
+
+- 时间：2026-05-02 05:55 CST。
+- 将 `scripts/real-llm-e2e.sh` 从订单取消 smoke 升级为独立全量真实 LLM E2E 套件。
+- 覆盖链路：
+  - 订单取消：`query_order -> cancel_order dry-run -> WAITING_USER_CONFIRMATION -> confirm -> SUCCEEDED`，并校验 MySQL 订单状态。
+  - ToDo：强制触发 `todo_create` / `todo_write`，校验 `todo_created`、`todo_updated` 事件。
+  - SubAgent：通过 `agent_tool` 创建 `ExploreAgent` child run，校验 parent-child link 与 parent tool result 中的 `childRunId`。
+  - Interrupt：长请求运行中调用 `POST /api/agent/runs/{runId}/interrupt`，校验 run 进入 `PAUSED`。
+  - Skill + compact：`/purchase-guide` slash 注入，调用 `skill_list`、多次 `skill_view`、`query_order`，校验 `LARGE_RESULT_SPILL`、`MICRO_COMPACT`、`SUMMARY_COMPACT` 全部落库。
+  - Provider fallback：故意将 DeepSeek base-url 指向不可连接地址，校验 `llm_fallback` event、DeepSeek failed attempt、Qwen succeeded attempt。
+- 开发中踩坑：
+  - demo 订单“昨天”受 MySQL UTC 与本地 Asia/Shanghai 时间差影响，`DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 DAY)` 会在凌晨附近漂移。修复为 reset 脚本按 Asia/Shanghai 明确写入昨天中午。
+  - child run 的 `childRunId` 在 trajectory DTO result preview 中可能被截断；E2E 改为用 MySQL parent-child link 与 `agent_tool` result JSON 断言。
+  - 请求侧 `maxTurns` 最大值是 10，E2E 不再传 12。
+  - safe 工具并发完成时，多个线程可能同时 append TOOL message 并争用 `agent_message(run_id, seq)`。修复 `MybatisTrajectoryStore.appendMessage`，遇到 seq 唯一键冲突时重新读取 next seq 后重试。
+  - `ToolExecutionLauncher` 和 `ToolCallCoordinator` 可能同时 close 同一个 terminal，导致重复 TOOL message，provider replay 报 orphan tool result。修复 `ToolResultCloser`，按 `runId + toolUseId` 使用 striped lock 串行关闭并重新读取 closed state。
+  - trajectory 查询 `agent_llm_attempt` 时因为 `raw_diagnostic_json` 较大且排序未命中 covering index，MySQL 报 sort buffer 不足。新增 V10/V11 migration：建立 `(run_id, turn_no, started_at)` 索引并删除旧 `(run_id, turn_no)` 索引，避免 optimizer 选错。
+  - provider-backed summary 在真实 DeepSeek 下可能以 `LENGTH` 结束并返回半截 JSON。修复 `ProviderSummaryGenerator`：summary attempt 遇到 `LENGTH` 视为 retryable summary failure，按 RunContext fallback 到 Qwen；同时支持从 fenced / 带前后解释文本的输出中提取完整 JSON object。
+- 验证：
+  - `mvn -q -Dtest=com.ai.agent.llm.ProviderSummaryGeneratorTest,com.ai.agent.llm.SummaryCompactorTest,com.ai.agent.tool.ToolResultCloserTest,com.ai.agent.trajectory.MybatisTrajectoryStoreTest test`：通过。
+  - `MYSQL_PASSWORD=*** DEEPSEEK_API_KEY=*** QWEN_API_KEY=*** ./scripts/real-llm-e2e.sh`：通过。
+  - 本次通过产物：`/tmp/agent-buyer-real-llm-e2e/20260502-055204`。
+
 ## V2 踩坑记录
 
 - Flyway 已应用的 migration 不要回改 checksum；本次 V8 已在本地 DB 应用后需要补字段，正确做法是保留 V8、追加 V8_1 幂等迁移。

@@ -309,16 +309,24 @@ MYSQL_PASSWORD='<local mysql password>' ./scripts/reset-demo-order.sh
 ./scripts/demo-cancel-order.sh
 ```
 
-运行真实 LLM 端到端 smoke。该脚本默认用 18080 端口临时启动应用，真实调用 DeepSeek，完成 `query_order -> cancel_order dry-run -> 用户确认 -> cancel_order confirm`，并校验 trajectory 与 MySQL 订单状态。它不会进入默认 `mvn test`，避免本地单测依赖外部模型服务：
+运行真实 LLM 端到端套件。该脚本默认用 18080 端口临时启动应用，真实调用 DeepSeek 与 Qwen，覆盖订单取消、ToDo、SubAgent、interrupt、skill 渐进式加载、三类 context compact，以及 DeepSeek 故障后 Qwen fallback。它不会进入默认 `mvn test`，避免本地单测依赖外部模型服务：
 
 ```bash
 export MYSQL_PASSWORD='<local mysql password>'
 export DEEPSEEK_API_KEY='<deepseek api key>'
-export QWEN_API_KEY='<qwen api key>' # 可选，用于 fallback 配置
+export QWEN_API_KEY='<qwen api key>'
 ./scripts/real-llm-e2e.sh
 ```
 
-产物默认写入 `/tmp/agent-buyer-real-llm-e2e/<timestamp>`，包括应用日志、两段 SSE 响应、请求体和 trajectory。
+产物默认写入 `/tmp/agent-buyer-real-llm-e2e/<timestamp>`，包括每个场景的应用日志、SSE 响应、请求体、summary 和 trajectory。脚本会依次验证：
+
+- `query_order -> cancel_order dry-run -> WAITING_USER_CONFIRMATION -> confirm -> SUCCEEDED`
+- `todo_create` / `todo_write` 及 ToDo 事件落库
+- `agent_tool -> ExploreAgent` child run 创建、parent-child link 与 result summary
+- `POST /api/agent/runs/{runId}/interrupt` 将 active turn 置为 `PAUSED`
+- `/purchase-guide` slash 注入、`skill_list`、多次 `skill_view` 与 `query_order`
+- `LARGE_RESULT_SPILL`、`MICRO_COMPACT`、`SUMMARY_COMPACT`
+- DeepSeek pre-stream failure 后 fallback 到 Qwen 并完成最终回答
 
 手动流程：
 

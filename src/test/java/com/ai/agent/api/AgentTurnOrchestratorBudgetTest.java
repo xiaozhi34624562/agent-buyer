@@ -428,7 +428,7 @@ class AgentTurnOrchestratorBudgetTest {
                         new ToolResultWaiter(new FakeRedisToolStore(), properties, TestObjectProvider.empty()),
                         trajectoryStore,
                         trajectoryStore,
-                        new ToolResultCloser(trajectoryStore, trajectoryStore),
+                        new ToolResultCloser(trajectoryStore, trajectoryStore, TestObjectProvider.empty()),
                         objectMapper
                 ),
                 trajectoryStore,

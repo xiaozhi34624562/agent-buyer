@@ -162,7 +162,7 @@ class V20ProviderSelectionIntegrationTest {
                         new ToolResultWaiter(redisToolStore, properties, TestObjectProvider.empty()),
                         trajectoryStore,
                         trajectoryStore,
-                        new ToolResultCloser(trajectoryStore, trajectoryStore),
+                        new ToolResultCloser(trajectoryStore, trajectoryStore, TestObjectProvider.empty()),
                         objectMapper
                 ),
                 trajectoryStore,

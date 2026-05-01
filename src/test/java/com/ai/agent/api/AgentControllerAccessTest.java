@@ -104,7 +104,7 @@ class AgentControllerAccessTest {
                 runAccessManager,
                 continuationLockService,
                 redisToolStore,
-                new ToolResultCloser(trajectoryStore, trajectoryStore),
+                new ToolResultCloser(trajectoryStore, trajectoryStore, TestObjectProvider.empty()),
                 new TrajectoryQueryService(trajectoryStore, new ObjectMapper()),
                 interruptService(runAccessManager)
         );
@@ -124,7 +124,7 @@ class AgentControllerAccessTest {
                 runAccessManager,
                 new RunStateMachine(trajectoryStore),
                 redisToolStore,
-                new ToolResultCloser(trajectoryStore, trajectoryStore),
+                new ToolResultCloser(trajectoryStore, trajectoryStore, TestObjectProvider.empty()),
                 new RunEventSinkRegistry(),
                 new EmptyChildRunRegistry(),
                 trajectoryStore

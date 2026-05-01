@@ -153,6 +153,12 @@ Path: /Users/xiaozhi/.codex/skills/java-alibaba-review/SKILL.md
 | V22-15 | V2.2 文档与演示收口 | README/Postman 增加 interrupt、多实例、ToDo、Pub/Sub fallback 演示；公开说明 SubAgent 同步等待限制仍存在 | DONE | V22-14 |
 | V22-GATE | V2.2 hardening review gate | `mvn test` 通过；V20、V21 集成测试全部通过；V2.2 review agent 无 P0/P1/P2；多实例 smoke 通过；`progress.md` 记录 V2 完成摘要 | DONE | V22-15 |
 
+## V2 真实 E2E 追加验证任务
+
+| id | task | 验收标准 | status | blockedBy |
+|---|---|---|---|---|
+| V2-E2E-01 | 重置真实 LLM E2E 全量套件 | 独立脚本覆盖订单取消、ToDo、SubAgent、interrupt、skill slash / skill_list / skill_view、三类 context compact、DeepSeek -> Qwen fallback；运行产物写入 `/tmp/agent-buyer-real-llm-e2e/<timestamp>`；`progress.md` 记录踩坑与验证结果 | DONE | V22-GATE |
+
 ## 任务边界
 
 V2 明确不做：

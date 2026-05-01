@@ -18,6 +18,7 @@ import com.ai.agent.tool.ToolResultCloser;
 import com.ai.agent.tool.ToolResultWaiter;
 import com.ai.agent.tool.ToolRuntime;
 import com.ai.agent.tool.redis.RedisToolStore;
+import com.ai.agent.support.TestObjectProvider;
 import com.ai.agent.trajectory.RunContextStore;
 import com.ai.agent.trajectory.TrajectoryReader;
 import com.ai.agent.trajectory.TrajectoryStore;
@@ -77,7 +78,7 @@ final class AgentLoopTestFactory {
                         toolResultWaiter,
                         trajectoryStore,
                         trajectoryReader,
-                        new ToolResultCloser(trajectoryStore, trajectoryReader),
+                        new ToolResultCloser(trajectoryStore, trajectoryReader, TestObjectProvider.empty()),
                         objectMapper
                 ),
                 trajectoryReader,

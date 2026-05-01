@@ -102,6 +102,12 @@ public final class ProviderSummaryGenerator implements SummaryGenerator {
             if (result.toolCalls() != null && !result.toolCalls().isEmpty()) {
                 throw new IllegalStateException("summary provider returned tool calls");
             }
+            if (result.finishReason() == FinishReason.LENGTH) {
+                throw new ProviderCallException(
+                        ProviderErrorType.RETRYABLE_PRE_STREAM,
+                        "summary provider reached max tokens before producing complete JSON"
+                );
+            }
             String content = stripJsonFence(result.content());
             if (content.isBlank()) {
                 throw new IllegalStateException("summary provider returned blank content");
@@ -275,6 +281,44 @@ public final class ProviderSummaryGenerator implements SummaryGenerator {
         if (stripped.endsWith("```")) {
             stripped = stripped.substring(0, stripped.length() - 3).strip();
         }
-        return stripped;
+        String jsonObject = firstCompleteJsonObject(stripped);
+        return jsonObject == null ? stripped : jsonObject;
+    }
+
+    private String firstCompleteJsonObject(String content) {
+        int start = content.indexOf('{');
+        if (start < 0) {
+            return null;
+        }
+        boolean inString = false;
+        boolean escaped = false;
+        int depth = 0;
+        for (int i = start; i < content.length(); i++) {
+            char ch = content.charAt(i);
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (ch == '\\' && inString) {
+                escaped = true;
+                continue;
+            }
+            if (ch == '"') {
+                inString = !inString;
+                continue;
+            }
+            if (inString) {
+                continue;
+            }
+            if (ch == '{') {
+                depth++;
+            } else if (ch == '}') {
+                depth--;
+                if (depth == 0) {
+                    return content.substring(start, i + 1).strip();
+                }
+            }
+        }
+        return null;
     }
 }

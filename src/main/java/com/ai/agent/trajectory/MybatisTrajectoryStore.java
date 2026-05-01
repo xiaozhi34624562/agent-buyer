@@ -38,6 +38,7 @@ import java.util.Map;
 
 @Service
 public class MybatisTrajectoryStore implements TrajectoryStore, TrajectoryReader {
+    private static final int APPEND_MESSAGE_MAX_RETRIES = 8;
     private static final TypeReference<List<ToolCallMessage>> TOOL_CALLS_TYPE = new TypeReference<>() {
     };
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
@@ -160,16 +161,27 @@ public class MybatisTrajectoryStore implements TrajectoryStore, TrajectoryReader
     @Override
     public String appendMessage(String runId, LlmMessage message) {
         String messageId = message.messageId() == null ? Ids.newId("msg") : message.messageId();
-        AgentMessageEntity entity = new AgentMessageEntity();
-        entity.setMessageId(messageId);
-        entity.setRunId(runId);
-        entity.setSeq(nextMessageSeq(runId));
-        entity.setRole(message.role().name());
-        entity.setContent(message.content());
-        entity.setToolUseId(message.toolUseId());
-        entity.setToolCalls(jsonOrNull(message.toolCalls().isEmpty() ? null : message.toolCalls()));
-        entity.setExtras(jsonOrNull(message.extras().isEmpty() ? null : message.extras()));
-        messageMapper.insert(entity);
+        String toolCallsJson = jsonOrNull(message.toolCalls().isEmpty() ? null : message.toolCalls());
+        String extrasJson = jsonOrNull(message.extras().isEmpty() ? null : message.extras());
+        for (int attempt = 1; attempt <= APPEND_MESSAGE_MAX_RETRIES; attempt++) {
+            AgentMessageEntity entity = new AgentMessageEntity();
+            entity.setMessageId(messageId);
+            entity.setRunId(runId);
+            entity.setSeq(nextMessageSeq(runId));
+            entity.setRole(message.role().name());
+            entity.setContent(message.content());
+            entity.setToolUseId(message.toolUseId());
+            entity.setToolCalls(toolCallsJson);
+            entity.setExtras(extrasJson);
+            try {
+                messageMapper.insert(entity);
+                return messageId;
+            } catch (DuplicateKeyException e) {
+                if (attempt == APPEND_MESSAGE_MAX_RETRIES) {
+                    throw e;
+                }
+            }
+        }
         return messageId;
     }
 

@@ -53,6 +53,29 @@ class ProviderSummaryGeneratorTest {
     }
 
     @Test
+    void extractsJsonSummaryFromMarkdownFenceAndSurroundingText() {
+        AgentProperties properties = new AgentProperties();
+        FakeProviderAdapter provider = new FakeProviderAdapter("deepseek", """
+                下面是 JSON：
+                ```json
+                {"summaryText":"ok","businessFacts":[],"toolFacts":[],"openQuestions":[],"compactedMessageIds":["u1"]}
+                ```
+                done
+                """);
+        ProviderSummaryGenerator generator = new ProviderSummaryGenerator(
+                properties,
+                new LlmProviderAdapterRegistry(List.of(provider)),
+                new RecordingTrajectoryStore(),
+                new ObjectMapper()
+        );
+
+        String summary = generator.generate("run-1", List.of(LlmMessage.user("u1", "hello")));
+
+        assertThat(summary).startsWith("{").endsWith("}");
+        assertThat(summary).contains("\"summaryText\":\"ok\"");
+    }
+
+    @Test
     void writesSummaryLlmAttemptWithBudgetObserver() {
         AgentProperties properties = new AgentProperties();
         FakeProviderAdapter provider = new FakeProviderAdapter("deepseek", """
@@ -115,6 +138,39 @@ class ProviderSummaryGeneratorTest {
     }
 
     @Test
+    void lengthLimitedPrimarySummaryFallsBackToRunContextFallbackProvider() {
+        FakeProviderAdapter deepseek = new FakeProviderAdapter(
+                "deepseek",
+                "{\"summaryText\":\"truncated",
+                List.of(),
+                FinishReason.LENGTH
+        );
+        FakeProviderAdapter qwen = new FakeProviderAdapter("qwen", """
+                {"summaryText":"fallback complete","businessFacts":[],"toolFacts":[],"openQuestions":[],"compactedMessageIds":["u1"]}
+                """.trim());
+        RecordingTrajectoryStore trajectoryStore = new RecordingTrajectoryStore();
+        ProviderSummaryGenerator generator = new ProviderSummaryGenerator(
+                new AgentProperties(),
+                new LlmProviderAdapterRegistry(List.of(deepseek, qwen)),
+                trajectoryStore,
+                new ObjectMapper()
+        );
+
+        String summary = generator.generate(
+                new SummaryGenerationContext("run-1", 4, runContext("run-1"), LlmCallObserver.NOOP),
+                List.of(LlmMessage.user("u1", "hello"))
+        );
+
+        assertThat(summary).contains("fallback complete");
+        assertThat(trajectoryStore.attempts).extracting(AttemptRecord::provider)
+                .containsExactly("deepseek", "qwen");
+        assertThat(trajectoryStore.attempts).extracting(AttemptRecord::status)
+                .containsExactly("FAILED", "SUCCEEDED");
+        assertThat(trajectoryStore.events).extracting(EventRecord::eventType)
+                .containsExactly("llm_fallback");
+    }
+
+    @Test
     void rejectsProviderSummaryThatReturnsToolCalls() {
         FakeProviderAdapter provider = new FakeProviderAdapter(
                 "deepseek",
@@ -137,6 +193,7 @@ class ProviderSummaryGeneratorTest {
         private final String providerName;
         private final String content;
         private final List<ToolCallMessage> toolCalls;
+        private final FinishReason finishReason;
         private final AtomicReference<LlmChatRequest> lastRequest = new AtomicReference<>();
 
         private FakeProviderAdapter(String providerName, String content) {
@@ -144,9 +201,19 @@ class ProviderSummaryGeneratorTest {
         }
 
         private FakeProviderAdapter(String providerName, String content, List<ToolCallMessage> toolCalls) {
+            this(providerName, content, toolCalls, FinishReason.STOP);
+        }
+
+        private FakeProviderAdapter(
+                String providerName,
+                String content,
+                List<ToolCallMessage> toolCalls,
+                FinishReason finishReason
+        ) {
             this.providerName = providerName;
             this.content = content;
             this.toolCalls = toolCalls;
+            this.finishReason = finishReason;
         }
 
         @Override
@@ -164,7 +231,7 @@ class ProviderSummaryGeneratorTest {
             request.beforeProviderCall();
             lastRequest.set(request);
             listener.onTextDelta(content);
-            return new LlmStreamResult(content, toolCalls, FinishReason.STOP, null, "{}");
+            return new LlmStreamResult(content, toolCalls, finishReason, null, "{}");
         }
 
         private LlmChatRequest lastRequest() {
