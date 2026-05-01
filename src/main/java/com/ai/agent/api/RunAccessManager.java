@@ -42,7 +42,7 @@ public final class RunAccessManager {
 
     public void assertCanContinue(String runId, String userId) {
         assertOwner(runId, userId);
-        assertWaitingForConfirmation(runId);
+        assertContinuable(runId);
     }
 
     public void requireOwner(String userId, String runId) {
@@ -56,13 +56,13 @@ public final class RunAccessManager {
             throw new RunContinuationLockedException("run continuation is already locked: " + runId);
         }
         try {
-            assertWaitingForConfirmation(runId);
-            if (!stateMachine.startContinuation(runId).changed()) {
+            RunStatus status = requireContinuable(runId);
+            if (!stateMachine.startContinuation(runId, status).changed()) {
                 throw new RunContinuationNotAllowedException(
-                        "run must still be WAITING_USER_CONFIRMATION before continuation starts: " + runId
+                        "run must still be WAITING_USER_CONFIRMATION or PAUSED before continuation starts: " + runId
                 );
             }
-            return new ContinuationPermit(lock);
+            return new ContinuationPermit(lock, status);
         } catch (RuntimeException e) {
             continuationLockService.release(lock);
             throw e;
@@ -89,16 +89,21 @@ public final class RunAccessManager {
     }
 
     private void restoreWaitingStatus(ContinuationPermit permit) {
-        stateMachine.restoreWaitingAfterContinuationFailure(permit.runId());
+        stateMachine.restoreAfterContinuationFailure(permit.runId(), permit.previousStatus);
     }
 
-    private void assertWaitingForConfirmation(String runId) {
+    private void assertContinuable(String runId) {
+        requireContinuable(runId);
+    }
+
+    private RunStatus requireContinuable(String runId) {
         RunStatus status = trajectoryStore.findRunStatus(runId);
-        if (status != RunStatus.WAITING_USER_CONFIRMATION) {
+        if (status != RunStatus.WAITING_USER_CONFIRMATION && status != RunStatus.PAUSED) {
             throw new RunContinuationNotAllowedException(
-                    "run must be WAITING_USER_CONFIRMATION before continuation: " + status
+                    "run must be WAITING_USER_CONFIRMATION or PAUSED before continuation: " + status
             );
         }
+        return status;
     }
 
     public static final class RunNotFoundException extends RuntimeException {
@@ -127,13 +132,19 @@ public final class RunAccessManager {
 
     public static final class ContinuationPermit {
         private final ContinuationLockService.Lock lock;
+        private final RunStatus previousStatus;
 
-        private ContinuationPermit(ContinuationLockService.Lock lock) {
+        private ContinuationPermit(ContinuationLockService.Lock lock, RunStatus previousStatus) {
             this.lock = lock;
+            this.previousStatus = previousStatus;
         }
 
         public String runId() {
             return lock.runId();
+        }
+
+        public RunStatus previousStatus() {
+            return previousStatus;
         }
     }
 

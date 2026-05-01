@@ -19,18 +19,37 @@ public final class RunStateMachine {
     }
 
     public TransitionResult startContinuation(String runId) {
-        return transition(runId, RunStatus.WAITING_USER_CONFIRMATION, RunStatus.RUNNING, null);
+        RunStatus current = trajectoryStore.findRunStatus(runId);
+        return startContinuation(runId, current);
+    }
+
+    public TransitionResult startContinuation(String runId, RunStatus current) {
+        if (current == RunStatus.WAITING_USER_CONFIRMATION || current == RunStatus.PAUSED) {
+            return transition(runId, current, RunStatus.RUNNING, null);
+        }
+        return new TransitionResult(current, false);
     }
 
     public TransitionResult restoreWaitingAfterContinuationFailure(String runId) {
-        if (trajectoryStore.transitionRunStatus(runId, RunStatus.RUNNING, RunStatus.WAITING_USER_CONFIRMATION, null)) {
-            return new TransitionResult(RunStatus.WAITING_USER_CONFIRMATION, true);
+        return restoreAfterContinuationFailure(runId, RunStatus.WAITING_USER_CONFIRMATION);
+    }
+
+    public TransitionResult restoreAfterContinuationFailure(String runId, RunStatus previousStatus) {
+        if (previousStatus != RunStatus.WAITING_USER_CONFIRMATION && previousStatus != RunStatus.PAUSED) {
+            return new TransitionResult(trajectoryStore.findRunStatus(runId), false);
+        }
+        if (trajectoryStore.transitionRunStatus(runId, RunStatus.RUNNING, previousStatus, null)) {
+            return new TransitionResult(previousStatus, true);
         }
         return new TransitionResult(trajectoryStore.findRunStatus(runId), false);
     }
 
     public TransitionResult completeFromRunning(String runId, RunStatus next, String error) {
         return transition(runId, RunStatus.RUNNING, next, error);
+    }
+
+    public TransitionResult pauseFromRunning(String runId, String reason) {
+        return transition(runId, RunStatus.RUNNING, RunStatus.PAUSED, reason);
     }
 
     public TransitionResult confirmationTimeout(String runId) {

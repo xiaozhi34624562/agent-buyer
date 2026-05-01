@@ -324,7 +324,7 @@ V2 必须按 `V2.0 -> V2.1 -> V2.2` 顺序推进，里程碑内部按 `task.md` 
 - 前置：`V20-03`。
 - 关注点：建连前才允许 fallback；stream 已写入 tool delta 后必须禁止 fallback（这是 V2 约束的核心安全边界）；fallback 选型只能从 RunContext 读取。
 
-### V20-04a IN_PROGRESS
+### V20-04a DONE
 
 - 写入范围：`RunStateMachine` 迁移表、`RunStatus` 是否新增 `PAUSED` 字面量、`RunStateMachine` 单元测试。
 - 前置：`V20-01`。
@@ -343,6 +343,10 @@ V2 必须按 `V2.0 -> V2.1 -> V2.2` 顺序推进，里程碑内部按 `task.md` 
 - 修复方式：`RunAccessManager` 将 continuable 状态定义为 `WAITING_USER_CONFIRMATION / PAUSED`，并把已读取的状态传给 `RunStateMachine.startContinuation(runId, status)`，避免重复 DB 读和无效 CAS。
 - targeted：`mvn -Dtest=com.ai.agent.api.RunStateMachineTest,com.ai.agent.RunAccessManagerTest test`，21 tests，0 failures，`BUILD SUCCESS`。
 - full：`MYSQL_PASSWORD=*** mvn test`，90 tests，0 failures，`BUILD SUCCESS`。
+- review gate 发现 continuation 失败回滚不能硬编码回 `WAITING_USER_CONFIRMATION`，否则 `PAUSED` continuation 在 executor reject / pre-append failure 后会被错误恢复；已在 `ContinuationPermit` 保存原状态并按原状态 CAS 回滚。
+- 最终 targeted：`mvn -Dtest=com.ai.agent.api.RunStateMachineTest,com.ai.agent.RunAccessManagerTest,com.ai.agent.api.DefaultAgentLoopRunContextTest test`，31 tests，0 failures，`BUILD SUCCESS`。
+- 最终 full：`MYSQL_PASSWORD=*** mvn test`，92 tests，0 failures，0 errors，`BUILD SUCCESS`。
+- `java-alibaba-review` gate：未发现阻断 issue；确认 `WAITING_USER_CONFIRMATION / PAUSED` continuation 的原状态恢复路径由 CAS 保护，不覆盖终态。
 
 ### V20-05 PENDING
 

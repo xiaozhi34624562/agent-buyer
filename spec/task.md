@@ -94,7 +94,7 @@ Path: /Users/xiaozhi/.codex/skills/java-alibaba-review/SKILL.md
 | V20-02 | 抽象 `LlmProviderAdapterRegistry` 与 provider profile 边界 | DeepSeek 通过 registry/profile 调用；业务代码不直接依赖具体 provider；provider 选型从 RunContext 读取；现有 DeepSeek 测试通过 | PENDING | V20-02a |
 | V20-03 | 接入 `QwenProviderAdapter` 与 `QwenCompatibilityProfile` | Qwen base-url/api-key/model 可配置；tools/messages/finish reason/usage/error mapping 有单元测试；Qwen stream tool delta 可组装为 `ToolCall` | PENDING | V20-02 |
 | V20-04 | 实现 `ProviderFallbackPolicy` 与 fallback attempt 语义 | 建连前网络错误、429、5xx 可 fallback；stream 已产生 tool delta 后不 fallback；fallback provider 选型从 RunContext 读取，不能从请求默认覆盖；fallback attempt 写 `agent_llm_attempt` 与 `agent_event` | PENDING | V20-03 |
-| V20-04a | RunStateMachine 增加 `PAUSED` 状态迁移 | `RunStateMachine` 接受 `RUNNING -> PAUSED`；`PAUSED` 可 continuation；合法/非法迁移单测覆盖；`CANCELLED` 仍不可 continuation | IN_PROGRESS | V20-01 |
+| V20-04a | RunStateMachine 增加 `PAUSED` 状态迁移 | `RunStateMachine` 接受 `RUNNING -> PAUSED`；`PAUSED` 可 continuation；合法/非法迁移单测覆盖；`CANCELLED` 仍不可 continuation | DONE | V20-01 |
 | V20-05 | 引入 `AgentExecutionBudget` 的 MainAgent 与 run-wide 预算 | MainAgent user turn 最多 30 次 LLM call；run-wide 最多 80 次；触发后 run -> `PAUSED`，写 `MAIN_TURN_BUDGET` / `RUN_WIDE_BUDGET` event | PENDING | V20-04,V20-04a |
 | V20-06 | 实现 `ContextViewBuilder`，分离原始 trajectory 与 provider view | provider 请求前从 MySQL 原始 messages 构建 view；不修改原始 trajectory；compact 前后均调用 `TranscriptPairValidator` | PENDING | V20-02 |
 | V20-07 | 实现 `LargeResultSpiller` | 单个 tool result > 2000 token 时，provider view 保留头 200 token、尾 200 token，中间插入 `<resultPath>`；MySQL 原始结果不删除 | PENDING | V20-06 |

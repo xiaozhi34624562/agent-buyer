@@ -77,6 +77,66 @@ class RunStateMachineTest {
         assertThat(store.status).isEqualTo(RunStatus.TIMEOUT);
     }
 
+    @Test
+    void runningRunCanBePaused() {
+        FakeTrajectoryStore store = new FakeTrajectoryStore();
+        RunStateMachine stateMachine = new RunStateMachine(store);
+        String runId = "run-pause";
+        store.status = RunStatus.RUNNING;
+
+        RunStateMachine.TransitionResult result = stateMachine.pauseFromRunning(runId, "manual_pause");
+
+        assertThat(result.status()).isEqualTo(RunStatus.PAUSED);
+        assertThat(result.changed()).isTrue();
+        assertThat(store.status).isEqualTo(RunStatus.PAUSED);
+        assertThat(store.events).containsExactly(
+                "transition:" + runId + ":RUNNING->PAUSED"
+        );
+    }
+
+    @Test
+    void pausedRunCanStartContinuation() {
+        FakeTrajectoryStore store = new FakeTrajectoryStore();
+        RunStateMachine stateMachine = new RunStateMachine(store);
+        String runId = "run-paused-continuation";
+        store.status = RunStatus.PAUSED;
+
+        RunStateMachine.TransitionResult result = stateMachine.startContinuation(runId);
+
+        assertThat(result.status()).isEqualTo(RunStatus.RUNNING);
+        assertThat(result.changed()).isTrue();
+        assertThat(store.status).isEqualTo(RunStatus.RUNNING);
+        assertThat(store.events).containsExactly(
+                "findStatus:" + runId,
+                "transition:" + runId + ":PAUSED->RUNNING"
+        );
+    }
+
+    @Test
+    void cancelledRunCannotStartContinuation() {
+        FakeTrajectoryStore store = new FakeTrajectoryStore();
+        RunStateMachine stateMachine = new RunStateMachine(store);
+        String runId = "run-cancelled-continuation";
+        store.status = RunStatus.CANCELLED;
+
+        RunStateMachine.TransitionResult result = stateMachine.startContinuation(runId);
+
+        assertThat(result.status()).isEqualTo(RunStatus.CANCELLED);
+        assertThat(result.changed()).isFalse();
+        assertThat(store.status).isEqualTo(RunStatus.CANCELLED);
+        assertThat(store.events).containsExactly(
+                "findStatus:" + runId
+        );
+    }
+
+    @Test
+    void pausedStatusIsNotTerminal() {
+        FakeTrajectoryStore store = new FakeTrajectoryStore();
+        RunStateMachine stateMachine = new RunStateMachine(store);
+
+        assertThat(stateMachine.isTerminal(RunStatus.PAUSED)).isFalse();
+    }
+
     private static final class FakeTrajectoryStore implements TrajectoryStore {
         private RunStatus status;
         private final List<String> events = new ArrayList<>();

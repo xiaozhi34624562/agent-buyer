@@ -89,6 +89,25 @@ class RunAccessManagerTest {
     }
 
     @Test
+    void acquireContinuationAllowsPausedRun() {
+        String runId = "run-paused";
+        trajectoryStore.owner = "owner";
+        trajectoryStore.status = RunStatus.PAUSED;
+
+        RunAccessManager.ContinuationPermit acquired = runAccessManager.acquireContinuation("owner", runId);
+
+        assertThat(acquired.runId()).isEqualTo(runId);
+        assertThat(trajectoryStore.status).isEqualTo(RunStatus.RUNNING);
+        assertThat(trajectoryStore.events).containsSequence(
+                "findOwner:" + runId,
+                "acquire:" + runId,
+                "findStatus:" + runId,
+                "transition:" + runId + ":PAUSED->RUNNING"
+        );
+        assertThat(trajectoryStore.events).doesNotContain("release:" + runId);
+    }
+
+    @Test
     void acquireContinuationReleasesLockWhenStatusCasFails() {
         String runId = "run-cas-race";
         trajectoryStore.owner = "owner";
@@ -124,6 +143,42 @@ class RunAccessManagerTest {
         assertThat(trajectoryStore.events).containsExactly(
                 "transition:" + runId + ":RUNNING->WAITING_USER_CONFIRMATION",
                 "release:" + runId
+        );
+    }
+
+    @Test
+    void restorePausedAfterRejectedSubmitUsesOriginalStatus() {
+        String runId = "run-paused-rejected";
+        trajectoryStore.owner = "owner";
+        trajectoryStore.status = RunStatus.PAUSED;
+        RunAccessManager.ContinuationPermit permit = runAccessManager.acquireContinuation("owner", runId);
+        trajectoryStore.events.clear();
+        trajectoryStore.status = RunStatus.RUNNING;
+
+        runAccessManager.restoreWaitingAfterRejectedSubmit(permit);
+
+        assertThat(permit.previousStatus()).isEqualTo(RunStatus.PAUSED);
+        assertThat(trajectoryStore.status).isEqualTo(RunStatus.PAUSED);
+        assertThat(trajectoryStore.events).containsExactly(
+                "transition:" + runId + ":RUNNING->PAUSED",
+                "release:" + runId
+        );
+    }
+
+    @Test
+    void restorePausedAfterContinuationStartFailureUsesOriginalStatus() {
+        String runId = "run-paused-start-failure";
+        trajectoryStore.owner = "owner";
+        trajectoryStore.status = RunStatus.PAUSED;
+        RunAccessManager.ContinuationPermit permit = runAccessManager.acquireContinuation("owner", runId);
+        trajectoryStore.events.clear();
+        trajectoryStore.status = RunStatus.RUNNING;
+
+        runAccessManager.restoreWaitingAfterContinuationStartFailure(permit);
+
+        assertThat(trajectoryStore.status).isEqualTo(RunStatus.PAUSED);
+        assertThat(trajectoryStore.events).containsExactly(
+                "transition:" + runId + ":RUNNING->PAUSED"
         );
     }
 
