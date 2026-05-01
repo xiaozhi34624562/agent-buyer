@@ -12,6 +12,9 @@ import com.ai.agent.llm.ProviderCallException;
 import com.ai.agent.llm.ProviderErrorType;
 import com.ai.agent.tool.ToolCall;
 import com.ai.agent.tool.ToolTerminal;
+import com.ai.agent.trajectory.ContextCompactionDraft;
+import com.ai.agent.trajectory.ContextCompactionRecord;
+import com.ai.agent.trajectory.ContextCompactionStore;
 import com.ai.agent.trajectory.RunContext;
 import com.ai.agent.trajectory.TrajectoryReader;
 import com.ai.agent.trajectory.TrajectoryStore;
@@ -33,7 +36,8 @@ class LlmAttemptServiceTest {
         LlmAttemptService service = new LlmAttemptService(
                 new LlmProviderAdapterRegistry(List.of(new CapturingProvider("deepseek"), qwen)),
                 trajectoryStore,
-                new ObjectMapper()
+                new ObjectMapper(),
+                record -> null
         );
 
         service.executeAttempt(
@@ -64,7 +68,8 @@ class LlmAttemptServiceTest {
         LlmAttemptService service = new LlmAttemptService(
                 new LlmProviderAdapterRegistry(List.of(primary, fallback)),
                 trajectoryStore,
-                new ObjectMapper()
+                new ObjectMapper(),
+                record -> null
         );
 
         LlmStreamResult result = service.executeAttempt(
@@ -110,7 +115,8 @@ class LlmAttemptServiceTest {
         LlmAttemptService service = new LlmAttemptService(
                 new LlmProviderAdapterRegistry(List.of(primary, fallback)),
                 trajectoryStore,
-                new ObjectMapper()
+                new ObjectMapper(),
+                record -> null
         );
 
         assertThatThrownBy(() -> service.executeAttempt(
@@ -144,7 +150,8 @@ class LlmAttemptServiceTest {
         LlmAttemptService service = new LlmAttemptService(
                 new LlmProviderAdapterRegistry(List.of(primary, fallback)),
                 trajectoryStore,
-                new ObjectMapper()
+                new ObjectMapper(),
+                record -> null
         );
 
         assertThatThrownBy(() -> service.executeAttempt(
@@ -177,7 +184,8 @@ class LlmAttemptServiceTest {
         LlmAttemptService service = new LlmAttemptService(
                 new LlmProviderAdapterRegistry(List.of(primary, qwen, configuredDefault)),
                 trajectoryStore,
-                new ObjectMapper()
+                new ObjectMapper(),
+                record -> null
         );
 
         service.executeAttempt(
@@ -199,6 +207,42 @@ class LlmAttemptServiceTest {
     }
 
     @Test
+    void fallbackAttemptReceivesOwnCompactionAttribution() throws Exception {
+        FailingProvider primary = new FailingProvider(
+                "deepseek",
+                new ProviderCallException(ProviderErrorType.RETRYABLE_PRE_STREAM, "DeepSeek retryable status 500", 500)
+        );
+        CapturingProvider fallback = new CapturingProvider("qwen");
+        RecordingTrajectoryStore trajectoryStore = new RecordingTrajectoryStore();
+        RecordingCompactionStore compactionStore = new RecordingCompactionStore();
+        LlmAttemptService service = new LlmAttemptService(
+                new LlmProviderAdapterRegistry(List.of(primary, fallback)),
+                trajectoryStore,
+                new ObjectMapper(),
+                compactionStore
+        );
+
+        service.executeAttempt(
+                "run-1",
+                1,
+                "att-1",
+                runContext("deepseek", "qwen", "{}"),
+                "deepseek-reasoner",
+                null,
+                List.of(LlmMessage.user("msg-1", "hello")),
+                List.of(),
+                List.of(new ContextCompactionDraft("SUMMARY_COMPACT", 100, 20, List.of("msg-old"))),
+                new NoopAgentEventSink()
+        );
+
+        String fallbackAttemptId = trajectoryStore.attempts.get(1).attemptId();
+        assertThat(compactionStore.records).extracting(ContextCompactionRecord::attemptId)
+                .containsExactly("att-1", fallbackAttemptId);
+        assertThat(compactionStore.records).extracting(ContextCompactionRecord::compactedMessageIds)
+                .containsExactly(List.of("msg-old"), List.of("msg-old"));
+    }
+
+    @Test
     void fallbackBudgetRejectionDoesNotWriteFallbackEventOrAttempt() {
         FailingProvider primary = new FailingProvider(
                 "deepseek",
@@ -209,7 +253,8 @@ class LlmAttemptServiceTest {
         LlmAttemptService service = new LlmAttemptService(
                 new LlmProviderAdapterRegistry(List.of(primary, fallback)),
                 trajectoryStore,
-                new ObjectMapper()
+                new ObjectMapper(),
+                record -> null
         );
 
         assertThatThrownBy(() -> service.executeAttempt(
@@ -230,6 +275,44 @@ class LlmAttemptServiceTest {
         assertThat(trajectoryStore.attempts).extracting(AttemptRecord::provider)
                 .containsExactly("deepseek");
         assertThat(trajectoryStore.events).isEmpty();
+    }
+
+    @Test
+    void retryBudgetRejectionAfterAcceptedProviderCallWritesFailedAttemptForCompactionAttribution() {
+        BudgetRejectingRetryProvider provider = new BudgetRejectingRetryProvider("deepseek");
+        RecordingTrajectoryStore trajectoryStore = new RecordingTrajectoryStore();
+        RecordingCompactionStore compactionStore = new RecordingCompactionStore();
+        LlmAttemptService service = new LlmAttemptService(
+                new LlmProviderAdapterRegistry(List.of(provider)),
+                trajectoryStore,
+                new ObjectMapper(),
+                compactionStore
+        );
+
+        assertThatThrownBy(() -> service.executeAttempt(
+                "run-1",
+                1,
+                "att-1",
+                runContext("deepseek", "qwen", "{}"),
+                "deepseek-chat",
+                null,
+                List.of(LlmMessage.user("msg-1", "hello")),
+                List.of(),
+                List.of(new ContextCompactionDraft("LARGE_RESULT_SPILL", 120, 40, List.of("tool-1"))),
+                new NoopAgentEventSink(),
+                new FallbackRejectingObserver()
+        )).isInstanceOf(LlmCallBudgetExceededException.class);
+
+        assertThat(provider.requests).hasSize(1);
+        assertThat(trajectoryStore.attempts).singleElement().satisfies(attempt -> {
+            assertThat(attempt.attemptId()).isEqualTo("att-1");
+            assertThat(attempt.status()).isEqualTo("FAILED");
+            assertThat(attempt.errorJson()).contains("RUN_WIDE_BUDGET");
+        });
+        assertThat(compactionStore.records).singleElement().satisfies(record -> {
+            assertThat(record.attemptId()).isEqualTo("att-1");
+            assertThat(record.compactedMessageIds()).containsExactly("tool-1");
+        });
     }
 
     private static RunContext runContext(String primaryProvider, String fallbackProvider, String providerOptions) {
@@ -300,6 +383,33 @@ class LlmAttemptServiceTest {
         }
     }
 
+    private static final class BudgetRejectingRetryProvider implements LlmProviderAdapter {
+        private final String providerName;
+        private final List<LlmChatRequest> requests = new ArrayList<>();
+
+        private BudgetRejectingRetryProvider(String providerName) {
+            this.providerName = providerName;
+        }
+
+        @Override
+        public String providerName() {
+            return providerName;
+        }
+
+        @Override
+        public String defaultModel() {
+            return providerName + "-default";
+        }
+
+        @Override
+        public LlmStreamResult streamChat(LlmChatRequest request, LlmStreamListener listener) {
+            request.beforeProviderCall();
+            requests.add(request);
+            request.beforeProviderCall();
+            throw new ProviderCallException(ProviderErrorType.RETRYABLE_PRE_STREAM, "unreachable");
+        }
+    }
+
     private static final class FallbackRejectingObserver implements com.ai.agent.llm.LlmCallObserver {
         private int calls;
 
@@ -316,6 +426,16 @@ class LlmAttemptServiceTest {
     }
 
     private record EventRecord(String eventType, String payloadJson) {
+    }
+
+    private static final class RecordingCompactionStore implements ContextCompactionStore {
+        private final List<ContextCompactionRecord> records = new ArrayList<>();
+
+        @Override
+        public String record(ContextCompactionRecord record) {
+            records.add(record);
+            return "cmp-" + records.size();
+        }
     }
 
     private static final class RecordingTrajectoryStore implements TrajectoryStore, TrajectoryReader {

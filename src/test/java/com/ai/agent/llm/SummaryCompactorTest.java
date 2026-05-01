@@ -251,7 +251,7 @@ class SummaryCompactorTest {
         private List<String> seenMessageIds = List.of();
 
         @Override
-        public String generate(String runId, List<LlmMessage> messagesToCompact) {
+        public String generate(SummaryGenerationContext context, List<LlmMessage> messagesToCompact) {
             seenMessageIds = messagesToCompact.stream()
                     .map(LlmMessage::messageId)
                     .toList();

@@ -1,6 +1,8 @@
 package com.ai.agent.llm;
 
 import com.ai.agent.config.AgentProperties;
+import com.ai.agent.domain.FinishReason;
+import com.ai.agent.trajectory.TrajectoryStore;
 import com.ai.agent.util.Ids;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -25,45 +27,118 @@ public final class ProviderSummaryGenerator implements SummaryGenerator {
 
     private final AgentProperties properties;
     private final LlmProviderAdapterRegistry providerRegistry;
+    private final TrajectoryStore trajectoryStore;
     private final ObjectMapper objectMapper;
 
     public ProviderSummaryGenerator(
             AgentProperties properties,
             LlmProviderAdapterRegistry providerRegistry,
+            TrajectoryStore trajectoryStore,
             ObjectMapper objectMapper
     ) {
         this.properties = properties;
         this.providerRegistry = providerRegistry;
+        this.trajectoryStore = trajectoryStore;
         this.objectMapper = objectMapper;
     }
 
     @Override
-    public String generate(String runId, List<LlmMessage> messagesToCompact) {
+    public String generate(SummaryGenerationContext context, List<LlmMessage> messagesToCompact) {
         LlmProviderAdapter provider = providerRegistry.resolve(properties.getLlm().getProvider());
-        LlmStreamResult result = provider.streamChat(
-                new LlmChatRequest(
-                        runId,
-                        Ids.newId("summary_att"),
-                        provider.defaultModel(),
-                        0.0,
-                        properties.getContext().getSummaryMaxTokens(),
-                        List.of(
-                                LlmMessage.system("summary-system", SYSTEM_PROMPT),
-                                LlmMessage.user("summary-input", summaryInput(messagesToCompact))
-                        ),
-                        List.of()
-                ),
-                ignored -> {
-                }
+        String attemptId = Ids.newId("summary_att");
+        String providerName = provider.providerName();
+        String model = provider.defaultModel();
+        SummaryCallObserver observer = new SummaryCallObserver(context.callObserver());
+        try {
+            LlmStreamResult result = provider.streamChat(
+                    new LlmChatRequest(
+                            context.runId(),
+                            attemptId,
+                            model,
+                            0.0,
+                            properties.getContext().getSummaryMaxTokens(),
+                            List.of(
+                                    LlmMessage.system("summary-system", SYSTEM_PROMPT),
+                                    LlmMessage.user("summary-input", summaryInput(messagesToCompact))
+                            ),
+                            List.of(),
+                            observer
+                    ),
+                    ignored -> {
+                    }
+            );
+            if (result.toolCalls() != null && !result.toolCalls().isEmpty()) {
+                throw new IllegalStateException("summary provider returned tool calls");
+            }
+            String content = stripJsonFence(result.content());
+            if (content.isBlank()) {
+                throw new IllegalStateException("summary provider returned blank content");
+            }
+            writeAttempt(context, attemptId, providerName, model, "SUCCEEDED", result.finishReason(), result, null);
+            return content;
+        } catch (Exception e) {
+            if (observer.providerCallAccepted()) {
+                writeAttempt(context, attemptId, providerName, model, "FAILED", FinishReason.ERROR, null, errorJson(e));
+            }
+            throw e;
+        }
+    }
+
+    private void writeAttempt(
+            SummaryGenerationContext context,
+            String attemptId,
+            String provider,
+            String model,
+            String status,
+            FinishReason finishReason,
+            LlmStreamResult result,
+            String errorJson
+    ) {
+        LlmUsage usage = result == null ? null : result.usage();
+        trajectoryStore.writeLlmAttempt(
+                attemptId,
+                context.runId(),
+                context.turnNo(),
+                provider,
+                model,
+                status,
+                finishReason,
+                usage == null ? null : usage.promptTokens(),
+                usage == null ? null : usage.completionTokens(),
+                usage == null ? null : usage.totalTokens(),
+                errorJson,
+                result == null ? null : result.rawDiagnosticJson()
         );
-        if (result.toolCalls() != null && !result.toolCalls().isEmpty()) {
-            throw new IllegalStateException("summary provider returned tool calls");
+    }
+
+    private String errorJson(Exception failure) {
+        try {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("type", "summary_provider_failed");
+            payload.put("message", failure.getMessage() == null ? "" : failure.getMessage());
+            return objectMapper.writeValueAsString(payload);
+        } catch (JsonProcessingException e) {
+            return "{\"type\":\"summary_provider_failed\"}";
         }
-        String content = stripJsonFence(result.content());
-        if (content.isBlank()) {
-            throw new IllegalStateException("summary provider returned blank content");
+    }
+
+    private static final class SummaryCallObserver implements LlmCallObserver {
+        private final LlmCallObserver delegate;
+        private boolean accepted;
+
+        private SummaryCallObserver(LlmCallObserver delegate) {
+            this.delegate = delegate == null ? LlmCallObserver.NOOP : delegate;
         }
-        return content;
+
+        @Override
+        public void beforeProviderCall() {
+            delegate.beforeProviderCall();
+            accepted = true;
+        }
+
+        private boolean providerCallAccepted() {
+            return accepted;
+        }
     }
 
     private String summaryInput(List<LlmMessage> messagesToCompact) {

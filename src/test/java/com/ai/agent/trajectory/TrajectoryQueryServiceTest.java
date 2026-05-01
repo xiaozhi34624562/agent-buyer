@@ -6,6 +6,7 @@ import com.ai.agent.persistence.entity.AgentEventEntity;
 import com.ai.agent.persistence.entity.AgentLlmAttemptEntity;
 import com.ai.agent.persistence.entity.AgentMessageEntity;
 import com.ai.agent.persistence.entity.AgentRunEntity;
+import com.ai.agent.persistence.entity.AgentContextCompactionEntity;
 import com.ai.agent.persistence.entity.AgentToolCallTraceEntity;
 import com.ai.agent.persistence.entity.AgentToolProgressEntity;
 import com.ai.agent.persistence.entity.AgentToolResultTraceEntity;
@@ -39,11 +40,22 @@ class TrajectoryQueryServiceTest {
         assertThat(dto.toolResults()).allSatisfy(toolResult -> assertThat(toolResult).isNotInstanceOf(AgentToolResultTraceEntity.class));
         assertThat(dto.events()).allSatisfy(event -> assertThat(event).isNotInstanceOf(AgentEventEntity.class));
         assertThat(dto.toolProgress()).allSatisfy(progress -> assertThat(progress).isNotInstanceOf(AgentToolProgressEntity.class));
+        assertThat(dto.compactions()).allSatisfy(compaction -> assertThat(compaction).isNotInstanceOf(AgentContextCompactionEntity.class));
 
         assertThat(recordComponents(MessageToolCallDto.class)).containsExactly("toolUseId", "toolName");
         assertThat(recordComponents(ToolCallDto.class)).doesNotContain("argsJson");
         assertThat(dto.messages().getFirst().toolCalls())
                 .containsExactly(new MessageToolCallDto("tool-use-1", "cancel_order"));
+        assertThat(dto.compactions()).hasSize(1)
+                .first()
+                .satisfies(compaction -> {
+                    assertThat(compaction.turnNo()).isEqualTo(2);
+                    assertThat(compaction.attemptId()).isEqualTo("att-compact-1");
+                    assertThat(compaction.strategy()).isEqualTo("summary");
+                    assertThat(compaction.beforeTokens()).isEqualTo(1200);
+                    assertThat(compaction.afterTokens()).isEqualTo(420);
+                    assertThat(compaction.compactedMessageIds()).containsExactly("msg-1", "msg-2");
+                });
 
         assertThat(json)
                 .doesNotContain("confirmToken")
@@ -154,6 +166,17 @@ class TrajectoryQueryServiceTest {
             progress.setPercent(50);
             progress.setCreatedAt(now);
 
+            AgentContextCompactionEntity compaction = new AgentContextCompactionEntity();
+            compaction.setCompactionId("cmp-1");
+            compaction.setRunId(runId);
+            compaction.setTurnNo(2);
+            compaction.setAttemptId("att-compact-1");
+            compaction.setStrategy("summary");
+            compaction.setBeforeTokens(1200);
+            compaction.setAfterTokens(420);
+            compaction.setCompactedMessageIds("[\"msg-1\",\"msg-2\"]");
+            compaction.setCreatedAt(now.plusSeconds(1));
+
             return new TrajectorySnapshot(
                     run,
                     List.of(message),
@@ -161,7 +184,8 @@ class TrajectoryQueryServiceTest {
                     List.of(call),
                     List.of(result),
                     List.of(event),
-                    List.of(progress)
+                    List.of(progress),
+                    List.of(compaction)
             );
         }
     }

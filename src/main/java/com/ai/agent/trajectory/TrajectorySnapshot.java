@@ -1,6 +1,7 @@
 package com.ai.agent.trajectory;
 
 import com.ai.agent.persistence.entity.AgentEventEntity;
+import com.ai.agent.persistence.entity.AgentContextCompactionEntity;
 import com.ai.agent.persistence.entity.AgentLlmAttemptEntity;
 import com.ai.agent.persistence.entity.AgentMessageEntity;
 import com.ai.agent.persistence.entity.AgentRunEntity;
@@ -17,7 +18,8 @@ public record TrajectorySnapshot(
         List<AgentToolCallTraceEntity> toolCalls,
         List<AgentToolResultTraceEntity> toolResults,
         List<AgentEventEntity> events,
-        List<AgentToolProgressEntity> toolProgress
+        List<AgentToolProgressEntity> toolProgress,
+        List<AgentContextCompactionEntity> compactions
 ) {
     public TrajectorySnapshot {
         messages = copyOrEmpty(messages);
@@ -26,6 +28,7 @@ public record TrajectorySnapshot(
         toolResults = copyOrEmpty(toolResults);
         events = copyOrEmpty(events);
         toolProgress = copyOrEmpty(toolProgress);
+        compactions = copyOrEmpty(compactions);
     }
 
     private static <T> List<T> copyOrEmpty(List<T> values) {

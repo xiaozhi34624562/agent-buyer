@@ -36,6 +36,10 @@ public final class SummaryCompactor {
     }
 
     public List<LlmMessage> compact(String runId, List<LlmMessage> messages) {
+        return compact(new SummaryGenerationContext(runId, 0, LlmCallObserver.NOOP), messages);
+    }
+
+    public List<LlmMessage> compact(SummaryGenerationContext context, List<LlmMessage> messages) {
         if (totalTokens(messages) < thresholdTokens()) {
             assertWithinHardTokenCap(messages);
             return List.copyOf(messages);
@@ -53,7 +57,7 @@ public final class SummaryCompactor {
                 .toList();
         LlmMessage summary = summaryMessage(
                 compactedMessageIds,
-                validateSummaryContent(summaryGenerator.generate(runId, messagesToCompact), compactedMessageIds)
+                validateSummaryContent(summaryGenerator.generate(context, messagesToCompact), compactedMessageIds)
         );
         List<LlmMessage> view = new ArrayList<>();
         boolean summaryInserted = false;

@@ -11,6 +11,9 @@ import com.ai.agent.llm.LlmUsage;
 import com.ai.agent.llm.ProviderCallException;
 import com.ai.agent.llm.ProviderFallbackPolicy;
 import com.ai.agent.tool.Tool;
+import com.ai.agent.trajectory.ContextCompactionDraft;
+import com.ai.agent.trajectory.ContextCompactionRecord;
+import com.ai.agent.trajectory.ContextCompactionStore;
 import com.ai.agent.trajectory.RunContext;
 import com.ai.agent.trajectory.TrajectoryStore;
 import com.ai.agent.util.Ids;
@@ -25,16 +28,19 @@ import java.util.Map;
 public final class LlmAttemptService {
     private final LlmProviderAdapterRegistry providerRegistry;
     private final TrajectoryStore trajectoryStore;
+    private final ContextCompactionStore compactionStore;
     private final ObjectMapper objectMapper;
     private final ProviderFallbackPolicy fallbackPolicy;
 
     public LlmAttemptService(
             LlmProviderAdapterRegistry providerRegistry,
             TrajectoryStore trajectoryStore,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            ContextCompactionStore compactionStore
     ) {
         this.providerRegistry = providerRegistry;
         this.trajectoryStore = trajectoryStore;
+        this.compactionStore = compactionStore;
         this.objectMapper = objectMapper;
         this.fallbackPolicy = new ProviderFallbackPolicy(objectMapper);
     }
@@ -50,7 +56,34 @@ public final class LlmAttemptService {
             List<Tool> allowedTools,
             AgentEventSink sink
     ) throws Exception {
-        return executeSingleAttempt(runId, turnNo, attemptId, providerName, model, params, messages, allowedTools, sink, LlmCallObserver.NOOP);
+        return executeAttempt(runId, turnNo, attemptId, providerName, model, params, messages, allowedTools, List.of(), sink);
+    }
+
+    public LlmStreamResult executeAttempt(
+            String runId,
+            int turnNo,
+            String attemptId,
+            String providerName,
+            String model,
+            LlmParams params,
+            List<LlmMessage> messages,
+            List<Tool> allowedTools,
+            List<ContextCompactionDraft> compactions,
+            AgentEventSink sink
+    ) throws Exception {
+        return executeSingleAttempt(
+                runId,
+                turnNo,
+                attemptId,
+                providerName,
+                model,
+                params,
+                messages,
+                allowedTools,
+                compactions,
+                sink,
+                LlmCallObserver.NOOP
+        );
     }
 
     public LlmStreamResult executeAttempt(
@@ -76,6 +109,49 @@ public final class LlmAttemptService {
             LlmParams params,
             List<LlmMessage> messages,
             List<Tool> allowedTools,
+            List<ContextCompactionDraft> compactions,
+            AgentEventSink sink
+    ) throws Exception {
+        return executeAttempt(
+                runId,
+                turnNo,
+                attemptId,
+                runContext,
+                model,
+                params,
+                messages,
+                allowedTools,
+                compactions,
+                sink,
+                LlmCallObserver.NOOP
+        );
+    }
+
+    public LlmStreamResult executeAttempt(
+            String runId,
+            int turnNo,
+            String attemptId,
+            RunContext runContext,
+            String model,
+            LlmParams params,
+            List<LlmMessage> messages,
+            List<Tool> allowedTools,
+            AgentEventSink sink,
+            LlmCallObserver callObserver
+    ) throws Exception {
+        return executeAttempt(runId, turnNo, attemptId, runContext, model, params, messages, allowedTools, List.of(), sink, callObserver);
+    }
+
+    public LlmStreamResult executeAttempt(
+            String runId,
+            int turnNo,
+            String attemptId,
+            RunContext runContext,
+            String model,
+            LlmParams params,
+            List<LlmMessage> messages,
+            List<Tool> allowedTools,
+            List<ContextCompactionDraft> compactions,
             AgentEventSink sink,
             LlmCallObserver callObserver
     ) throws Exception {
@@ -89,6 +165,7 @@ public final class LlmAttemptService {
                     params,
                     messages,
                     allowedTools,
+                    compactions,
                     sink,
                     callObserver
             );
@@ -106,6 +183,7 @@ public final class LlmAttemptService {
                         params,
                         messages,
                         allowedTools,
+                        compactions,
                         sink,
                         callObserver
                 );
@@ -144,12 +222,17 @@ public final class LlmAttemptService {
             LlmParams params,
             List<LlmMessage> messages,
             List<Tool> allowedTools,
+            List<ContextCompactionDraft> compactions,
             AgentEventSink sink,
             LlmCallObserver callObserver
     ) throws Exception {
         LlmProviderAdapter providerAdapter = providerRegistry.resolve(providerName);
         String actualProviderName = providerAdapter.providerName();
         String actualModel = effectiveModel(model, providerAdapter);
+        CompactionRecordingObserver observer = new CompactionRecordingObserver(
+                callObserver,
+                () -> recordCompactions(runId, turnNo, attemptId, compactions)
+        );
         try {
             LlmStreamResult result = providerAdapter.streamChat(
                     new LlmChatRequest(
@@ -160,17 +243,68 @@ public final class LlmAttemptService {
                             params == null ? null : params.maxTokens(),
                             messages,
                             allowedTools.stream().map(Tool::schema).toList(),
-                            callObserver
+                            observer
                     ),
                     delta -> sink.onTextDelta(new TextDeltaEvent(runId, attemptId, delta))
             );
             writeSucceededAttempt(runId, turnNo, attemptId, actualProviderName, actualModel, result);
             return result;
         } catch (LlmCallBudgetExceededException e) {
+            if (observer.providerCallAccepted()) {
+                writeBudgetExceededAttempt(runId, turnNo, attemptId, actualProviderName, actualModel, e);
+            }
             throw e;
         } catch (Exception e) {
             writeFailedAttempt(runId, turnNo, attemptId, actualProviderName, actualModel, e);
             throw e;
+        }
+    }
+
+    private void recordCompactions(
+            String runId,
+            int turnNo,
+            String attemptId,
+            List<ContextCompactionDraft> compactions
+    ) {
+        if (compactions == null || compactions.isEmpty()) {
+            return;
+        }
+        for (ContextCompactionDraft compaction : compactions) {
+            compactionStore.record(new ContextCompactionRecord(
+                    null,
+                    runId,
+                    turnNo,
+                    attemptId,
+                    compaction.strategy(),
+                    compaction.beforeTokens(),
+                    compaction.afterTokens(),
+                    compaction.compactedMessageIds(),
+                    null
+            ));
+        }
+    }
+
+    private static final class CompactionRecordingObserver implements LlmCallObserver {
+        private final LlmCallObserver delegate;
+        private final Runnable recordCompactions;
+        private boolean recorded;
+
+        private CompactionRecordingObserver(LlmCallObserver delegate, Runnable recordCompactions) {
+            this.delegate = delegate == null ? LlmCallObserver.NOOP : delegate;
+            this.recordCompactions = recordCompactions;
+        }
+
+        @Override
+        public void beforeProviderCall() {
+            delegate.beforeProviderCall();
+            if (!recorded) {
+                recorded = true;
+                recordCompactions.run();
+            }
+        }
+
+        private boolean providerCallAccepted() {
+            return recorded;
         }
     }
 
@@ -245,6 +379,30 @@ public final class LlmAttemptService {
                 null,
                 null,
                 errorJson("provider_failed", e),
+                null
+        );
+    }
+
+    private void writeBudgetExceededAttempt(
+            String runId,
+            int turnNo,
+            String attemptId,
+            String providerName,
+            String model,
+            LlmCallBudgetExceededException e
+    ) {
+        trajectoryStore.writeLlmAttempt(
+                attemptId,
+                runId,
+                turnNo,
+                providerName,
+                model,
+                "FAILED",
+                FinishReason.ERROR,
+                null,
+                null,
+                null,
+                errorJson("llm_budget_exceeded", e),
                 null
         );
     }

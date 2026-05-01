@@ -5,6 +5,7 @@ import com.ai.agent.domain.RunStatus;
 import com.ai.agent.llm.ContextViewBuilder;
 import com.ai.agent.llm.LlmMessage;
 import com.ai.agent.llm.LlmStreamResult;
+import com.ai.agent.llm.ProviderContextView;
 import com.ai.agent.tool.Tool;
 import com.ai.agent.trajectory.RunContext;
 import com.ai.agent.trajectory.TrajectoryStore;
@@ -76,10 +77,24 @@ public final class AgentTurnOrchestrator {
                 return terminal;
             }
 
-            int turnNo = trajectoryStore.nextTurn(runId);
-            List<LlmMessage> messages = contextViewBuilder.build(runId).messages();
             String attemptId = Ids.newId("att");
+            int turnNo = trajectoryStore.nextTurn(runId);
             try (MDC.MDCCloseable ignoredAttempt = MDC.putCloseable("attemptId", attemptId)) {
+                ProviderContextView contextView;
+                try {
+                    contextView = contextViewBuilder.build(
+                            runId,
+                            turnNo,
+                            () -> executionBudget.reserveMainLlmCall(turnBudget)
+                    );
+                } catch (LlmCallBudgetExceededException e) {
+                    stopped = stopIfNotRunning(runId);
+                    if (stopped != null) {
+                        return stopped;
+                    }
+                    return pauseForBudgetExceeded(runId, e, sink);
+                }
+                List<LlmMessage> messages = contextView.messages();
                 log.info("llm attempt started turnNo={} messageCount={} model={}", turnNo, messages.size(), model);
                 LlmStreamResult result;
                 try {
@@ -92,6 +107,7 @@ public final class AgentTurnOrchestrator {
                             params,
                             messages,
                             allowedTools,
+                            contextView.compactions(),
                             sink,
                             () -> executionBudget.reserveMainLlmCall(turnBudget)
                     );

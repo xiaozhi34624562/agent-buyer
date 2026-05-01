@@ -127,7 +127,12 @@ public final class DefaultAgentLoop implements AgentLoop {
                                         objectMapper
                                 )
                         ),
-                        new LlmAttemptService(new LlmProviderAdapterRegistry(List.of(providerAdapter)), trajectoryStore, objectMapper),
+                        new LlmAttemptService(
+                                new LlmProviderAdapterRegistry(List.of(providerAdapter)),
+                                trajectoryStore,
+                                objectMapper,
+                                record -> null
+                        ),
                         new ToolCallCoordinator(
                                 properties,
                                 toolRegistry,

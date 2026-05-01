@@ -16,6 +16,7 @@ import com.ai.agent.persistence.mapper.AgentEventMapper;
 import com.ai.agent.persistence.mapper.AgentLlmAttemptMapper;
 import com.ai.agent.persistence.mapper.AgentMessageMapper;
 import com.ai.agent.persistence.mapper.AgentRunMapper;
+import com.ai.agent.persistence.mapper.AgentContextCompactionMapper;
 import com.ai.agent.persistence.mapper.AgentToolCallTraceMapper;
 import com.ai.agent.persistence.mapper.AgentToolProgressMapper;
 import com.ai.agent.persistence.mapper.AgentToolResultTraceMapper;
@@ -47,6 +48,7 @@ public class MybatisTrajectoryStore implements TrajectoryStore, TrajectoryReader
     private final AgentToolResultTraceMapper toolResultMapper;
     private final AgentEventMapper eventMapper;
     private final AgentToolProgressMapper progressMapper;
+    private final AgentContextCompactionMapper compactionMapper;
     private final ObjectMapper objectMapper;
 
     public MybatisTrajectoryStore(
@@ -57,6 +59,7 @@ public class MybatisTrajectoryStore implements TrajectoryStore, TrajectoryReader
             AgentToolResultTraceMapper toolResultMapper,
             AgentEventMapper eventMapper,
             AgentToolProgressMapper progressMapper,
+            AgentContextCompactionMapper compactionMapper,
             ObjectMapper objectMapper
     ) {
         this.runMapper = runMapper;
@@ -66,6 +69,7 @@ public class MybatisTrajectoryStore implements TrajectoryStore, TrajectoryReader
         this.toolResultMapper = toolResultMapper;
         this.eventMapper = eventMapper;
         this.progressMapper = progressMapper;
+        this.compactionMapper = compactionMapper;
         this.objectMapper = objectMapper;
     }
 
@@ -229,7 +233,8 @@ public class MybatisTrajectoryStore implements TrajectoryStore, TrajectoryReader
                         .orderByAsc(AgentEventEntity::getCreatedAt)),
                 progressMapper.selectList(new LambdaQueryWrapper<AgentToolProgressEntity>()
                         .eq(AgentToolProgressEntity::getRunId, runId)
-                        .orderByAsc(AgentToolProgressEntity::getCreatedAt))
+                        .orderByAsc(AgentToolProgressEntity::getCreatedAt)),
+                compactionMapper.findByRunId(runId)
         );
     }
 

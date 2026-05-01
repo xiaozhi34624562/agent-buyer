@@ -1,6 +1,7 @@
 package com.ai.agent.trajectory;
 
 import com.ai.agent.persistence.entity.AgentEventEntity;
+import com.ai.agent.persistence.entity.AgentContextCompactionEntity;
 import com.ai.agent.persistence.entity.AgentLlmAttemptEntity;
 import com.ai.agent.persistence.entity.AgentMessageEntity;
 import com.ai.agent.persistence.entity.AgentRunEntity;
@@ -8,6 +9,7 @@ import com.ai.agent.persistence.entity.AgentToolCallTraceEntity;
 import com.ai.agent.persistence.entity.AgentToolProgressEntity;
 import com.ai.agent.persistence.entity.AgentToolResultTraceEntity;
 import com.ai.agent.trajectory.dto.AgentRunTrajectoryDto;
+import com.ai.agent.trajectory.dto.CompactionDto;
 import com.ai.agent.trajectory.dto.EventDto;
 import com.ai.agent.trajectory.dto.LlmAttemptDto;
 import com.ai.agent.trajectory.dto.MessageDto;
@@ -17,6 +19,7 @@ import com.ai.agent.trajectory.dto.ToolCallDto;
 import com.ai.agent.trajectory.dto.ToolProgressDto;
 import com.ai.agent.trajectory.dto.ToolResultDto;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -34,6 +37,8 @@ import java.util.regex.Pattern;
 
 @Service
 public class TrajectoryQueryService {
+    private static final TypeReference<List<String>> STRING_LIST_TYPE = new TypeReference<>() {
+    };
     private static final int MAX_PREVIEW_CHARS = 512;
     private static final Set<String> SENSITIVE_EXACT_NAMES = Set.of(
             "argsjson",
@@ -75,7 +80,8 @@ public class TrajectoryQueryService {
                 snapshot.toolCalls().stream().map(this::toToolCallDto).toList(),
                 snapshot.toolResults().stream().map(this::toToolResultDto).toList(),
                 snapshot.events().stream().map(this::toEventDto).toList(),
-                snapshot.toolProgress().stream().map(this::toToolProgressDto).toList()
+                snapshot.toolProgress().stream().map(this::toToolProgressDto).toList(),
+                snapshot.compactions().stream().map(this::toCompactionDto).toList()
         );
     }
 
@@ -171,6 +177,19 @@ public class TrajectoryQueryService {
         );
     }
 
+    private CompactionDto toCompactionDto(AgentContextCompactionEntity entity) {
+        return new CompactionDto(
+                entity.getCompactionId(),
+                entity.getTurnNo(),
+                entity.getAttemptId(),
+                entity.getStrategy(),
+                entity.getBeforeTokens(),
+                entity.getAfterTokens(),
+                readStringList(entity.getCompactedMessageIds()),
+                entity.getCreatedAt()
+        );
+    }
+
     private List<MessageToolCallDto> readMessageToolCalls(String toolCallsJson) {
         if (toolCallsJson == null || toolCallsJson.isBlank()) {
             return List.of();
@@ -189,6 +208,17 @@ public class TrajectoryQueryService {
                 }
             }
             return List.copyOf(toolCalls);
+        } catch (JsonProcessingException e) {
+            return List.of();
+        }
+    }
+
+    private List<String> readStringList(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(json, STRING_LIST_TYPE);
         } catch (JsonProcessingException e) {
             return List.of();
         }

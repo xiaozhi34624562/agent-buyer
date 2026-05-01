@@ -7,6 +7,8 @@ import com.ai.agent.tool.ToolCall;
 import com.ai.agent.tool.ToolTerminal;
 import com.ai.agent.trajectory.RunContext;
 import com.ai.agent.trajectory.RunContextStore;
+import com.ai.agent.trajectory.ContextCompactionRecord;
+import com.ai.agent.trajectory.ContextCompactionStore;
 import com.ai.agent.trajectory.TrajectoryReader;
 import com.ai.agent.trajectory.TrajectoryStore;
 import com.ai.agent.util.Ids;
@@ -31,8 +33,11 @@ class TrajectoryStoreIntegrationTest {
     @Autowired
     RunContextStore runContextStore;
 
+    @Autowired
+    ContextCompactionStore contextCompactionStore;
+
     @Test
-    void loadTrajectoryReturnsRunMessagesAttemptsToolCallsAndResults() {
+    void loadTrajectoryReturnsRunMessagesAttemptsToolCallsResultsAndCompactions() {
         String runId = Ids.newId("test_run");
         String toolUseId = Ids.newId("call");
         String toolCallId = Ids.newId("tc");
@@ -72,6 +77,17 @@ class TrajectoryStoreIntegrationTest {
                 List.of(call)
         );
         trajectoryStore.writeToolResult(runId, toolUseId, ToolTerminal.succeeded(toolCallId, "{}"));
+        contextCompactionStore.record(new ContextCompactionRecord(
+                null,
+                runId,
+                2,
+                "att-compact-1",
+                "summary",
+                1000,
+                450,
+                List.of("msg-old-1", "msg-old-2"),
+                null
+        ));
 
         var trajectory = trajectoryReader.loadTrajectorySnapshot(runId);
 
@@ -85,6 +101,18 @@ class TrajectoryStoreIntegrationTest {
                     assertThat(savedCall.getIdempotent()).isTrue();
                 });
         assertThat(trajectory.toolResults()).hasSize(1);
+        assertThat(trajectory.compactions()).hasSize(1)
+                .first()
+                .satisfies(compaction -> {
+                    assertThat(compaction.getRunId()).isEqualTo(runId);
+                    assertThat(compaction.getTurnNo()).isEqualTo(2);
+                    assertThat(compaction.getAttemptId()).isEqualTo("att-compact-1");
+                    assertThat(compaction.getStrategy()).isEqualTo("summary");
+                    assertThat(compaction.getBeforeTokens()).isEqualTo(1000);
+                    assertThat(compaction.getAfterTokens()).isEqualTo(450);
+                    assertThat(compaction.getCompactedMessageIds()).contains("msg-old-1", "msg-old-2");
+                    assertThat(compaction.getCreatedAt()).isNotNull();
+                });
     }
 
     @Test

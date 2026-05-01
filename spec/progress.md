@@ -523,11 +523,31 @@ V2 必须按 `V2.0 -> V2.1 -> V2.2` 顺序推进，里程碑内部按 `task.md` 
 - 全量验证：`MYSQL_PASSWORD=*** mvn test`，142 tests，0 failures，0 errors，`BUILD SUCCESS`。
 - 状态：DONE。
 
-### V20-10 PENDING
+### V20-10 DONE
 
 - 写入范围：`agent_context_compaction` 表、Flyway `V8__agent_context_compaction.sql`、`ContextCompactionRepository`、trajectory query DTO 扩展。
 - 前置：`V20-09`。
 - 关注点：迁移可重复执行；查询接口仍要走 `RunAccessManager`。
+
+启动记录：
+
+- 启动时间：2026-05-01 23:53 CST。
+- 工程判断：compactor 保持纯 provider-view 转换，不直接依赖 MySQL；由 `ContextViewBuilder` 在每个阶段比较 before/after 并写 `ContextCompactionStore`，记录策略、整段 view token 前后变化、被压缩 message id。
+- 分工：sub agent 负责 MySQL migration、entity/mapper/store、trajectory query DTO；主 agent 负责 builder 记录点、集成测试、review gate 与提交。
+
+实现记录：
+
+- 完成时间：2026-05-02 00:28 CST。
+- 新增 `agent_context_compaction` MySQL 轨迹表、`ContextCompactionStore`/MyBatis 实现、`CompactionDto`，trajectory query 返回 compaction strategy、before/after tokens、compactedMessageIds、turnNo、attemptId。
+- 为避免本地 Flyway 已应用 V8 后出现 checksum mismatch，`V8__agent_context_compaction.sql` 保持初始结构，新增 `V8_1__context_compaction_attempt_scope.sql` 幂等补充 `turn_no`、`attempt_id` 与索引。
+- review P2 修复：compaction 不再由 `ContextViewBuilder` 直接落库；builder 返回 provider view 与 `ContextCompactionDraft`，由 `LlmAttemptService` 在真实 provider attempt 预算通过后按 attemptId 持久化。
+- review P2 修复：fallback attempt 复用同一批 compaction drafts，但以 fallbackAttemptId 写入 attribution；同一 provider retry 中第二次撞 budget 时，如果已有 provider call 被放行，则写 FAILED `agent_llm_attempt`，避免 compaction orphan。
+- review P2 修复：provider-backed summary compact 也纳入同一 turn LLM budget。`SummaryGenerator` 接收 `SummaryGenerationContext`，`ProviderSummaryGenerator` 使用其中的 observer，并为 summary provider call 写 summary `agent_llm_attempt`；预算耗尽时 summary provider call 不发生。
+- TDD 红灯：新增 `budgetExceededDoesNotPersistCompactionForUnattemptedProviderCall`、`fallbackAttemptReceivesOwnCompactionAttribution`、`retryBudgetRejectionAfterAcceptedProviderCallWritesFailedAttemptForCompactionAttribution`、`budgetExceededBeforeSummaryCompactionDoesNotCallSummaryProvider` 后，分别暴露 orphan attribution 与 summary budget gap。
+- targeted 绿灯：`MYSQL_PASSWORD=*** mvn -Dtest=com.ai.agent.llm.ContextViewBuilderTest,com.ai.agent.llm.ProviderSummaryGeneratorTest,com.ai.agent.llm.SummaryCompactorTest,com.ai.agent.trajectory.TrajectoryQueryServiceTest,com.ai.agent.TrajectoryStoreIntegrationTest,com.ai.agent.api.AgentTurnOrchestratorBudgetTest,com.ai.agent.api.LlmAttemptServiceTest test`，33 tests，0 failures，`BUILD SUCCESS`。
+- 全量验证：`MYSQL_PASSWORD=*** mvn test`，148 tests，0 failures，0 errors，`BUILD SUCCESS`。
+- `java-alibaba-review`：多轮 review 后无未解决 P0/P1/P2；确认首次 budget 拒绝、fallback、provider retry、summary provider call 四条 attribution/budget 链路闭合。
+- 状态：DONE。
 
 ### V20-11 PENDING
 
@@ -590,7 +610,9 @@ V2.2 必须在 `V21-GATE` 完成后启动。占位列表：
 
 ## V2 踩坑记录
 
-随开发追加。延续 V1a 形式：一行结论 + 必要的根因或测试约束。当前为空。
+- Flyway 已应用的 migration 不要回改 checksum；本次 V8 已在本地 DB 应用后需要补字段，正确做法是保留 V8、追加 V8_1 幂等迁移。
+- context compaction attribution 不能在 provider view build 阶段落库；必须在具体 provider attempt 预算通过后记录，否则 budget pause、fallback、retry 都可能产生 orphan attemptId。
+- summary compact 不是“免费本地转换”；provider-backed summary 也是一次 LLM call，必须接入同一套 budget observer 和 `agent_llm_attempt` 轨迹。
 
 ## V2 变更日志
 

@@ -18,7 +18,7 @@ public final class DeterministicSummaryGenerator implements SummaryGenerator {
     }
 
     @Override
-    public String generate(String runId, List<LlmMessage> messagesToCompact) {
+    public String generate(SummaryGenerationContext context, List<LlmMessage> messagesToCompact) {
         List<String> compactedMessageIds = messagesToCompact.stream()
                 .map(LlmMessage::messageId)
                 .toList();

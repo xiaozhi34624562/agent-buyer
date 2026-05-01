@@ -94,7 +94,7 @@ class ToolResultCloserTest {
                         return entity;
                     })
                     .toList();
-            return new TrajectorySnapshot(run, messageEntities, List.of(), List.of(), toolResults, List.of(), List.of());
+            return new TrajectorySnapshot(run, messageEntities, List.of(), List.of(), toolResults, List.of(), List.of(), List.of());
         }
 
         @Override

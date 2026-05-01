@@ -13,6 +13,8 @@ import com.ai.agent.llm.LlmStreamResult;
 import com.ai.agent.llm.LargeResultSpiller;
 import com.ai.agent.llm.MicroCompactor;
 import com.ai.agent.llm.DeterministicSummaryGenerator;
+import com.ai.agent.llm.SummaryGenerationContext;
+import com.ai.agent.llm.SummaryGenerator;
 import com.ai.agent.llm.SummaryCompactor;
 import com.ai.agent.llm.TokenEstimator;
 import com.ai.agent.llm.TranscriptPairValidator;
@@ -25,6 +27,8 @@ import com.ai.agent.tool.ToolResultWaiter;
 import com.ai.agent.tool.ToolRuntime;
 import com.ai.agent.tool.ToolTerminal;
 import com.ai.agent.tool.redis.RedisToolStore;
+import com.ai.agent.trajectory.ContextCompactionRecord;
+import com.ai.agent.trajectory.ContextCompactionStore;
 import com.ai.agent.trajectory.RunContext;
 import com.ai.agent.trajectory.TrajectoryReader;
 import com.ai.agent.trajectory.TrajectoryStore;
@@ -89,11 +93,114 @@ class AgentTurnOrchestratorBudgetTest {
         assertThat(budgetStore.countsByRun.get("run-1")).isEqualTo(1L);
     }
 
+    @Test
+    void budgetExceededDoesNotPersistCompactionForUnattemptedProviderCall() {
+        AgentProperties properties = new AgentProperties();
+        properties.getAgentLoop().setLlmCallBudgetPerUserTurn(0);
+        properties.getAgentLoop().setRunWideLlmCallBudget(80);
+        properties.getContext().setLargeResultThresholdTokens(4);
+        properties.getContext().setLargeResultHeadTokens(1);
+        properties.getContext().setLargeResultTailTokens(1);
+        FakeTrajectoryStore trajectoryStore = new FakeTrajectoryStore();
+        trajectoryStore.statusByRun.put("run-1", RunStatus.RUNNING);
+        trajectoryStore.messagesByRun.put("run-1", List.of(
+                LlmMessage.assistant("assistant-1", null, List.of(new com.ai.agent.llm.ToolCallMessage("call-1", "query_order", "{}"))),
+                LlmMessage.tool("tool-1", "call-1", tokenText(12))
+        ));
+        RecordingCompactionStore compactionStore = new RecordingCompactionStore();
+        CountingProvider provider = new CountingProvider();
+        AgentTurnOrchestrator orchestrator = orchestrator(
+                properties,
+                trajectoryStore,
+                provider,
+                new InMemoryRunLlmCallBudgetStore(),
+                compactionStore
+        );
+
+        AgentRunResult result = orchestrator.runUntilStop("run-1", "user-1", runContext("run-1"), null, new CapturingSink());
+
+        assertThat(result.status()).isEqualTo(RunStatus.PAUSED);
+        assertThat(provider.networkCalls).isZero();
+        assertThat(trajectoryStore.attempts).isEmpty();
+        assertThat(compactionStore.records).isEmpty();
+    }
+
+    @Test
+    void budgetExceededBeforeSummaryCompactionDoesNotCallSummaryProvider() {
+        AgentProperties properties = new AgentProperties();
+        properties.getAgentLoop().setLlmCallBudgetPerUserTurn(0);
+        properties.getAgentLoop().setRunWideLlmCallBudget(80);
+        properties.getContext().setLargeResultThresholdTokens(Integer.MAX_VALUE);
+        properties.getContext().setMicroCompactThresholdTokens(Integer.MAX_VALUE);
+        properties.getContext().setSummaryCompactThresholdTokens(1);
+        properties.getContext().setRecentMessageBudgetTokens(1);
+        FakeTrajectoryStore trajectoryStore = new FakeTrajectoryStore();
+        trajectoryStore.statusByRun.put("run-1", RunStatus.RUNNING);
+        trajectoryStore.messagesByRun.put("run-1", List.of(
+                LlmMessage.system("s1", "system"),
+                LlmMessage.user("u1", "first"),
+                LlmMessage.assistant("a1", "second", List.of()),
+                LlmMessage.user("u2", "third"),
+                LlmMessage.user("u3", tokenText(20)),
+                LlmMessage.user("u4", "recent one"),
+                LlmMessage.assistant("a2", "recent two", List.of()),
+                LlmMessage.user("u5", "recent three")
+        ));
+        BudgetedSummaryGenerator summaryGenerator = new BudgetedSummaryGenerator();
+        RecordingCompactionStore compactionStore = new RecordingCompactionStore();
+        CountingProvider provider = new CountingProvider();
+        AgentTurnOrchestrator orchestrator = orchestrator(
+                properties,
+                trajectoryStore,
+                provider,
+                new InMemoryRunLlmCallBudgetStore(),
+                compactionStore,
+                summaryGenerator
+        );
+
+        AgentRunResult result = orchestrator.runUntilStop("run-1", "user-1", runContext("run-1"), null, new CapturingSink());
+
+        assertThat(result.status()).isEqualTo(RunStatus.PAUSED);
+        assertThat(summaryGenerator.providerCalls).isZero();
+        assertThat(provider.networkCalls).isZero();
+        assertThat(trajectoryStore.attempts).isEmpty();
+        assertThat(compactionStore.records).isEmpty();
+        assertThat(trajectoryStore.events).extracting(EventRecord::eventType).containsExactly("MAIN_TURN_BUDGET");
+    }
+
     private static AgentTurnOrchestrator orchestrator(
             AgentProperties properties,
             FakeTrajectoryStore trajectoryStore,
             LlmProviderAdapter provider,
             RunLlmCallBudgetStore budgetStore
+    ) {
+        return orchestrator(properties, trajectoryStore, provider, budgetStore, record -> null);
+    }
+
+    private static AgentTurnOrchestrator orchestrator(
+            AgentProperties properties,
+            FakeTrajectoryStore trajectoryStore,
+            LlmProviderAdapter provider,
+            RunLlmCallBudgetStore budgetStore,
+            ContextCompactionStore compactionStore
+    ) {
+        return orchestrator(
+                properties,
+                trajectoryStore,
+                provider,
+                budgetStore,
+                compactionStore,
+                new DeterministicSummaryGenerator(new ObjectMapper())
+        );
+    }
+
+    private static AgentTurnOrchestrator orchestrator(
+            AgentProperties properties,
+            FakeTrajectoryStore trajectoryStore,
+            LlmProviderAdapter provider,
+            RunLlmCallBudgetStore budgetStore,
+            ContextCompactionStore compactionStore,
+            SummaryGenerator summaryGenerator
     ) {
         ObjectMapper objectMapper = new ObjectMapper();
         return new AgentTurnOrchestrator(
@@ -106,11 +213,16 @@ class AgentTurnOrchestratorBudgetTest {
                         new SummaryCompactor(
                                 properties,
                                 new TokenEstimator(),
-                                new DeterministicSummaryGenerator(objectMapper),
+                                summaryGenerator,
                                 objectMapper
                         )
                 ),
-                new LlmAttemptService(new LlmProviderAdapterRegistry(List.of(provider)), trajectoryStore, objectMapper),
+                new LlmAttemptService(
+                        new LlmProviderAdapterRegistry(List.of(provider)),
+                        trajectoryStore,
+                        objectMapper,
+                        compactionStore
+                ),
                 new ToolCallCoordinator(
                         properties,
                         new ToolRegistry(List.of()),
@@ -337,6 +449,49 @@ class AgentTurnOrchestratorBudgetTest {
 
         @Override
         public void onError(ErrorEvent event) {
+        }
+    }
+
+    private static final class BudgetedSummaryGenerator implements SummaryGenerator {
+        private int providerCalls;
+
+        @Override
+        public String generate(SummaryGenerationContext context, List<LlmMessage> messagesToCompact) {
+            context.callObserver().beforeProviderCall();
+            providerCalls++;
+            List<String> ids = messagesToCompact.stream().map(LlmMessage::messageId).toList();
+            return """
+                    {"summaryText":"summary","businessFacts":[],"toolFacts":[],"openQuestions":[],"compactedMessageIds":%s}
+                    """.formatted(toJsonArray(ids)).trim();
+        }
+
+        private String toJsonArray(List<String> ids) {
+            List<String> values = new ArrayList<>();
+            for (String id : ids) {
+                values.add("\"" + id + "\"");
+            }
+            return "[" + String.join(",", values) + "]";
+        }
+    }
+
+    private static String tokenText(int tokenCount) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < tokenCount; i++) {
+            if (i > 0) {
+                builder.append(' ');
+            }
+            builder.append("tok").append(i);
+        }
+        return builder.toString();
+    }
+
+    private static final class RecordingCompactionStore implements ContextCompactionStore {
+        private final List<ContextCompactionRecord> records = new ArrayList<>();
+
+        @Override
+        public String record(ContextCompactionRecord record) {
+            records.add(record);
+            return "cmp-" + records.size();
         }
     }
 

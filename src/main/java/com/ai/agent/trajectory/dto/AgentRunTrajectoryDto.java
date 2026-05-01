@@ -9,7 +9,8 @@ public record AgentRunTrajectoryDto(
         List<ToolCallDto> toolCalls,
         List<ToolResultDto> toolResults,
         List<EventDto> events,
-        List<ToolProgressDto> toolProgress
+        List<ToolProgressDto> toolProgress,
+        List<CompactionDto> compactions
 ) {
     public AgentRunTrajectoryDto {
         messages = copyOrEmpty(messages);
@@ -18,6 +19,7 @@ public record AgentRunTrajectoryDto(
         toolResults = copyOrEmpty(toolResults);
         events = copyOrEmpty(events);
         toolProgress = copyOrEmpty(toolProgress);
+        compactions = copyOrEmpty(compactions);
     }
 
     private static <T> List<T> copyOrEmpty(List<T> values) {

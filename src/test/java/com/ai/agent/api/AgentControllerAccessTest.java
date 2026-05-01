@@ -828,7 +828,7 @@ class AgentControllerAccessTest {
             run.setUserId(ownerByRun.get(runId));
             run.setStatus(statusByRun.getOrDefault(runId, RunStatus.RUNNING).name());
             run.setTurnNo(turnNo);
-            return new TrajectorySnapshot(run, List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+            return new TrajectorySnapshot(run, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
         }
 
         @Override

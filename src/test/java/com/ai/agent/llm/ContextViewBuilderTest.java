@@ -116,7 +116,7 @@ class ContextViewBuilderTest {
         reader.messages.add(LlmMessage.user("u1", "first"));
         reader.messages.add(LlmMessage.assistant("a1", "second", List.of()));
         reader.messages.add(LlmMessage.user("u2", "third"));
-        LlmMessage rawOldMessage = LlmMessage.user("u3", tokenText(18));
+        LlmMessage rawOldMessage = LlmMessage.user("u3", tokenText(200));
         reader.messages.add(rawOldMessage);
         reader.messages.add(LlmMessage.user("u4", "recent one"));
         reader.messages.add(LlmMessage.assistant("a2", "recent two", List.of()));
@@ -134,7 +134,9 @@ class ContextViewBuilderTest {
                 new SummaryCompactor(
                         properties,
                         new TokenEstimator(),
-                        new DeterministicSummaryGenerator(new ObjectMapper()),
+                        (runId, messages) -> """
+                                {"summaryText":"short","businessFacts":[],"toolFacts":[],"openQuestions":[],"compactedMessageIds":["u3"]}
+                                """.trim(),
                         new ObjectMapper()
                 )
         );
@@ -146,8 +148,45 @@ class ContextViewBuilderTest {
                 .containsExactly("s1", "u1", "a1", "u2", "summary-u3", "u4", "a2", "u5");
         assertThat(view.messages().get(4).extras()).containsEntry("compactSummary", true);
         assertThat(view.messages().get(4).extras()).containsEntry("compactedMessageIds", List.of("u3"));
-        assertThat(rawOldMessage.content()).isEqualTo(tokenText(18));
-        assertThat(reader.messages.get(4).content()).isEqualTo(tokenText(18));
+        assertThat(view.compactions()).hasSize(1)
+                .first()
+                .satisfies(record -> {
+                    assertThat(record.strategy()).isEqualTo("SUMMARY_COMPACT");
+                    assertThat(record.beforeTokens()).isGreaterThan(record.afterTokens());
+                    assertThat(record.compactedMessageIds()).containsExactly("u3");
+                });
+        assertThat(rawOldMessage.content()).isEqualTo(tokenText(200));
+        assertThat(reader.messages.get(4).content()).isEqualTo(tokenText(200));
+    }
+
+    @Test
+    void recordsLargeAndMicroCompactionsWhenProviderViewChanges() {
+        FakeTrajectoryReader reader = new FakeTrajectoryReader();
+        reader.messages.add(LlmMessage.assistant("a-old", null, List.of(new ToolCallMessage("call_old", "query_order", "{}"))));
+        reader.messages.add(LlmMessage.tool("t-old", "call_old", tokenText(18)));
+        reader.messages.add(LlmMessage.user("u1", tokenText(18)));
+        reader.messages.add(LlmMessage.user("u2", tokenText(18)));
+        reader.messages.add(LlmMessage.user("u3", tokenText(18)));
+        AgentProperties properties = new AgentProperties();
+        properties.getContext().setLargeResultThresholdTokens(12);
+        properties.getContext().setLargeResultHeadTokens(3);
+        properties.getContext().setLargeResultTailTokens(2);
+        properties.getContext().setMicroCompactThresholdTokens(12);
+        ContextViewBuilder builder = new ContextViewBuilder(
+                reader,
+                new TranscriptPairValidator(),
+                new LargeResultSpiller(properties, new TokenEstimator()),
+                new MicroCompactor(properties, new TokenEstimator()),
+                noOpSummaryCompactor()
+        );
+
+        ProviderContextView view = builder.build("run-1");
+
+        assertThat(view.compactions()).hasSize(2);
+        assertThat(view.compactions().get(0).strategy()).isEqualTo("LARGE_RESULT_SPILL");
+        assertThat(view.compactions().get(0).compactedMessageIds()).containsExactly("t-old");
+        assertThat(view.compactions().get(1).strategy()).isEqualTo("MICRO_COMPACT");
+        assertThat(view.compactions().get(1).compactedMessageIds()).containsExactly("t-old");
     }
 
     private static LargeResultSpiller noOpSpiller() {
@@ -199,4 +238,5 @@ class ContextViewBuilderTest {
             return List.of();
         }
     }
+
 }
