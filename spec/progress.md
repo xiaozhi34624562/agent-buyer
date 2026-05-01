@@ -572,11 +572,26 @@ V2 必须按 `V2.0 -> V2.1 -> V2.2` 顺序推进，里程碑内部按 `task.md` 
 - 全量验证：`MYSQL_PASSWORD=*** mvn test`，150 tests，0 failures，0 errors，`BUILD SUCCESS`。
 - 状态：DONE。
 
-### V20-12 PENDING
+### V20-12 DONE
 
 - 写入范围：`README.md`、`postman/*.json`、`application*.yml` 示例配置。
 - 前置：`V20-11`。
 - 关注点：provider/context/budget 配置全部上 README；Postman 增加 multi-provider smoke 与 PAUSED continuation。
+
+启动记录：
+
+- 启动时间：2026-05-02 00:39 CST。
+- 工程判断：V20-12 不改运行时代码，只做用户可验证入口、配置显性化和 V2.0 状态说明；provider/context smoke 优先用脚本复用稳定的 targeted test，避免 Postman 依赖真实 provider 故障来触发 fallback。
+
+实现记录：
+
+- README 更新为 V2.0 当前状态：DeepSeek + Qwen provider registry/fallback、RunContext provider 复用、LLM call budget、context compact 三阶段、`agent_context_compaction` 轨迹表。
+- `application.yml` 显式补充 `llm-call-budget-per-user-turn=30`、`run-wide-llm-call-budget=80`，provider/context 配置保持可通过环境变量覆盖。
+- 新增 `scripts/v2-provider-context-smoke.sh`，覆盖 Qwen adapter/profile、fallback 边界、RunContext provider/model 复用、50K context compact、PAUSED/budget 状态机。
+- smoke 绿灯：`./scripts/v2-provider-context-smoke.sh`，35 tests，0 failures，`BUILD SUCCESS`。
+- `java-alibaba-review` 发现 2 个文档 P2：`agent.llm.provider` 容易被误读为主 run primary provider 可配置、README 把 V2.1 SubAgent 限制写得像已实现；已修正为主 run V2.0 固定 DeepSeek primary + Qwen fallback，`agent.llm.provider` 仅说明为 summary compact 默认 provider，SubAgent 描述改为 V2.1 计划项。
+- re-review：两个 P2 均已修复，未发现新 P0/P1/P2。
+- 状态：DONE。
 
 ### V20-GATE PENDING
 
