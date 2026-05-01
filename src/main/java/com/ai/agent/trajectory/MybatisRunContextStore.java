@@ -29,6 +29,9 @@ public class MybatisRunContextStore implements RunContextStore {
         entity.setRunId(context.runId());
         entity.setEffectiveAllowedTools(writeJson(context.effectiveAllowedTools()));
         entity.setModel(context.model());
+        entity.setPrimaryProvider(context.primaryProvider());
+        entity.setFallbackProvider(context.fallbackProvider());
+        entity.setProviderOptions(context.providerOptions());
         entity.setMaxTurns(context.maxTurns());
         mapper.insert(entity);
     }
@@ -43,6 +46,9 @@ public class MybatisRunContextStore implements RunContextStore {
                 entity.getRunId(),
                 readTools(entity.getEffectiveAllowedTools()),
                 entity.getModel(),
+                Objects.requireNonNull(entity.getPrimaryProvider(), "run context primaryProvider missing"),
+                Objects.requireNonNull(entity.getFallbackProvider(), "run context fallbackProvider missing"),
+                Objects.requireNonNull(entity.getProviderOptions(), "run context providerOptions missing"),
                 Objects.requireNonNull(entity.getMaxTurns(), "run context maxTurns missing"),
                 entity.getCreatedAt(),
                 entity.getUpdatedAt()

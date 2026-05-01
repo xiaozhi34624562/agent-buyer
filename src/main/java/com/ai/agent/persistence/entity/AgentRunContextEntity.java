@@ -11,6 +11,9 @@ public class AgentRunContextEntity {
     private String runId;
     private String effectiveAllowedTools;
     private String model;
+    private String primaryProvider;
+    private String fallbackProvider;
+    private String providerOptions;
     private Integer maxTurns;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
@@ -37,6 +40,30 @@ public class AgentRunContextEntity {
 
     public void setModel(String model) {
         this.model = model;
+    }
+
+    public String getPrimaryProvider() {
+        return primaryProvider;
+    }
+
+    public void setPrimaryProvider(String primaryProvider) {
+        this.primaryProvider = primaryProvider;
+    }
+
+    public String getFallbackProvider() {
+        return fallbackProvider;
+    }
+
+    public void setFallbackProvider(String fallbackProvider) {
+        this.fallbackProvider = fallbackProvider;
+    }
+
+    public String getProviderOptions() {
+        return providerOptions;
+    }
+
+    public void setProviderOptions(String providerOptions) {
+        this.providerOptions = providerOptions;
     }
 
     public Integer getMaxTurns() {

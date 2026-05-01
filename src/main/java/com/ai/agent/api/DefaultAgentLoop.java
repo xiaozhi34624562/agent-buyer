@@ -37,6 +37,9 @@ import java.util.stream.Collectors;
 @Service
 public final class DefaultAgentLoop implements AgentLoop {
     private static final Logger log = LoggerFactory.getLogger(DefaultAgentLoop.class);
+    private static final String PRIMARY_PROVIDER = "deepseek";
+    private static final String FALLBACK_PROVIDER = "qwen";
+    private static final String EMPTY_PROVIDER_OPTIONS = "{}";
 
     private final AgentProperties properties;
     private final PromptAssembler promptAssembler;
@@ -136,6 +139,9 @@ public final class DefaultAgentLoop implements AgentLoop {
                     runId,
                     effectiveAllowedToolNames(allowedTools),
                     effectiveModel(request.llmParams()),
+                    PRIMARY_PROVIDER,
+                    FALLBACK_PROVIDER,
+                    EMPTY_PROVIDER_OPTIONS,
                     effectiveMaxTurns(request.llmParams()),
                     null,
                     null
@@ -323,6 +329,15 @@ public final class DefaultAgentLoop implements AgentLoop {
     private void validateRunContext(RunContext runContext) {
         if (runContext.model() == null || runContext.model().isBlank()) {
             throw new IllegalStateException("run context model missing: " + runContext.runId());
+        }
+        if (runContext.primaryProvider() == null || runContext.primaryProvider().isBlank()) {
+            throw new IllegalStateException("run context primaryProvider missing: " + runContext.runId());
+        }
+        if (runContext.fallbackProvider() == null || runContext.fallbackProvider().isBlank()) {
+            throw new IllegalStateException("run context fallbackProvider missing: " + runContext.runId());
+        }
+        if (runContext.providerOptions() == null || runContext.providerOptions().isBlank()) {
+            throw new IllegalStateException("run context providerOptions missing: " + runContext.runId());
         }
         if (runContext.maxTurns() <= 0) {
             throw new IllegalStateException("run context maxTurns invalid: " + runContext.runId());

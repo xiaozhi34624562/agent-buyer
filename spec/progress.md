@@ -284,11 +284,27 @@ V2 必须按 `V2.0 -> V2.1 -> V2.2` 顺序推进，里程碑内部按 `task.md` 
 - Git 工作区基线：当前存在 V1a hardening 与 V2 spec 相关未提交文件；从 V20 开始按任务提交，避免后续任务混在一起。
 - V20-01 不涉及 Java/SQL/Lua/YAML 代码变更，跳过 `java-alibaba-review`，由主 agent 记录基线并验收。
 
-### V20-02a PENDING
+### V20-02a DONE
 
 - 写入范围：`agent_run_context`、`RunContext`、`RunContextStore`、`MybatisRunContextStore`、`AgentRunContextEntity`、`AgentRunContextMapper.xml`、Flyway `V7__run_context_provider_fields.sql`。
 - 前置：`V20-01`。
 - 关注点：迁移可重复执行；旧 run context 必须有 fail-closed 默认（参照 V6 历史经验，宁可保守也不放大权限）；create run / continuation 两条路径都要测试。
+
+启动记录：
+
+- 启动时间：2026-05-01 22:07 CST。
+- worker 写入范围限定为 RunContext provider 字段、V7 Flyway migration、相关 MyBatis entity/store/test。
+- 主 agent 要求先补红测，再实现，完成后运行 targeted 测试与 Flyway 校验。
+
+集成记录：
+
+- worker 已完成 provider 选型持久化，`RunContext` 增加 `primaryProvider / fallbackProvider / providerOptions`。
+- V7 Flyway migration 已在本地 MySQL 上通过，Flyway validate 显示 7 migrations。
+- 主 agent 全量回归：`MYSQL_PASSWORD=*** mvn test`，90 tests，0 failures，`BUILD SUCCESS`。
+- review gate 发现历史 context backfill 不能默认启用 Qwen fallback，已改成 `fallback_provider = primary_provider` 且 `provider_options.fallbackEnabled=false`，保证 legacy run fail-closed。
+- 修改已执行过的本地 Flyway V7 后出现 checksum mismatch，使用 Flyway repair 修复本地开发库 schema history；记录为坑：共享/已发布 migration 不应再改，当前仍处于未提交开发阶段所以允许。
+- 最终全量回归：`MYSQL_PASSWORD=*** mvn test`，92 tests，0 failures，0 errors，`BUILD SUCCESS`。
+- `java-alibaba-review` gate：未发现阻断 issue；遗留提醒是 V20-04 必须明确 `{}` providerOptions 的 fallback 默认语义。
 
 ### V20-02 PENDING
 
@@ -308,11 +324,25 @@ V2 必须按 `V2.0 -> V2.1 -> V2.2` 顺序推进，里程碑内部按 `task.md` 
 - 前置：`V20-03`。
 - 关注点：建连前才允许 fallback；stream 已写入 tool delta 后必须禁止 fallback（这是 V2 约束的核心安全边界）；fallback 选型只能从 RunContext 读取。
 
-### V20-04a PENDING
+### V20-04a IN_PROGRESS
 
 - 写入范围：`RunStateMachine` 迁移表、`RunStatus` 是否新增 `PAUSED` 字面量、`RunStateMachine` 单元测试。
 - 前置：`V20-01`。
 - 关注点：`PAUSED` 必须可 continuation；`CANCELLED/FAILED/TIMEOUT` 仍是终态不可 continuation；与 V1a 已有 CAS 路径不冲突。
+
+启动记录：
+
+- 启动时间：2026-05-01 22:07 CST。
+- worker 写入范围限定为 `RunStatus`、`RunStateMachine` 和状态机单元测试。
+- 主 agent 要求先补 `RUNNING -> PAUSED`、`PAUSED` continuation、`CANCELLED` continuation 拒绝的红测，再实现。
+
+集成记录：
+
+- worker 已完成 `PAUSED` 状态、`RUNNING -> PAUSED`、`PAUSED -> RUNNING` continuation。
+- 主 agent 集成时发现 `startContinuation` 盲试 `WAITING_USER_CONFIRMATION` 与 `PAUSED` 两个 CAS，会让 CAS race 路径多出一次无效 transition；同时 `RunAccessManager` 仍只允许 `WAITING_USER_CONFIRMATION` continuation。
+- 修复方式：`RunAccessManager` 将 continuable 状态定义为 `WAITING_USER_CONFIRMATION / PAUSED`，并把已读取的状态传给 `RunStateMachine.startContinuation(runId, status)`，避免重复 DB 读和无效 CAS。
+- targeted：`mvn -Dtest=com.ai.agent.api.RunStateMachineTest,com.ai.agent.RunAccessManagerTest test`，21 tests，0 failures，`BUILD SUCCESS`。
+- full：`MYSQL_PASSWORD=*** mvn test`，90 tests，0 failures，`BUILD SUCCESS`。
 
 ### V20-05 PENDING
 

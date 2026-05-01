@@ -86,6 +86,12 @@ class DefaultAgentLoopRunContextTest {
 
         assertThat(runContextStore.contextsByRun.get(trajectoryStore.createdRunId).effectiveAllowedTools())
                 .containsExactly("query_order");
+        assertThat(runContextStore.contextsByRun.get(trajectoryStore.createdRunId).primaryProvider())
+                .isEqualTo("deepseek");
+        assertThat(runContextStore.contextsByRun.get(trajectoryStore.createdRunId).fallbackProvider())
+                .isEqualTo("qwen");
+        assertThat(runContextStore.contextsByRun.get(trajectoryStore.createdRunId).providerOptions())
+                .isEqualTo("{}");
         assertThat(provider.requests.getFirst().tools())
                 .extracting(ToolSchema::name)
                 .containsExactly("query_order");
@@ -272,6 +278,9 @@ class DefaultAgentLoopRunContextTest {
                 runId,
                 List.of("retired_tool"),
                 "deepseek-reasoner",
+                "deepseek",
+                "qwen",
+                "{}",
                 10,
                 null,
                 null
@@ -288,6 +297,65 @@ class DefaultAgentLoopRunContextTest {
 
         assertThat(thrown).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("unknown tool: retired_tool");
+        assertThat(trajectoryStore.statusByRun.get(runId)).isEqualTo(RunStatus.WAITING_USER_CONFIRMATION);
+        assertThat(trajectoryStore.messagesByRun.get(runId)).isEmpty();
+    }
+
+    @Test
+    void continuationFailsClosedWhenRunContextProviderSelectionIsMissingBeforeAppendingUserMessage() {
+        AgentProperties properties = new AgentProperties();
+        FakeTrajectoryStore trajectoryStore = new FakeTrajectoryStore();
+        FakeRunContextStore runContextStore = new FakeRunContextStore();
+        FakeStringRedisTemplate redisTemplate = new FakeStringRedisTemplate();
+        RunAccessManager runAccessManager = new RunAccessManager(
+                trajectoryStore,
+                new ContinuationLockService(new RedisKeys(properties), redisTemplate)
+        );
+        DefaultAgentLoop loop = new DefaultAgentLoop(
+                properties,
+                new PromptAssembler(userId -> new UserProfile(userId, "Owner", null, null, null, "buyer")),
+                new CapturingProvider(trajectoryStore),
+                new TranscriptPairValidator(),
+                new ToolRegistry(List.of(new StubTool("query_order"))),
+                (ToolRuntime) (ignoredRunId, call) -> {
+                },
+                new FakeRedisToolStore(),
+                new ToolResultWaiter(new FakeRedisToolStore()),
+                trajectoryStore,
+                trajectoryStore,
+                runContextStore,
+                new RunEventSinkRegistry(),
+                runAccessManager,
+                new ConfirmTokenStore(properties, redisTemplate, new com.fasterxml.jackson.databind.ObjectMapper()),
+                new com.fasterxml.jackson.databind.ObjectMapper()
+        );
+        String runId = "run-context-missing-provider";
+        trajectoryStore.ownerByRun.put(runId, "owner");
+        trajectoryStore.statusByRun.put(runId, RunStatus.WAITING_USER_CONFIRMATION);
+        trajectoryStore.messagesByRun.put(runId, new ArrayList<>());
+        runContextStore.contextsByRun.put(runId, new RunContext(
+                runId,
+                List.of("query_order"),
+                "deepseek-reasoner",
+                "",
+                "qwen",
+                "{}",
+                10,
+                null,
+                null
+        ));
+        RunAccessManager.ContinuationPermit permit = runAccessManager.acquireContinuation("owner", runId);
+
+        Throwable thrown = catchThrowable(() -> loop.continueRun(
+                "owner",
+                runId,
+                new UserMessage("user", "continue"),
+                new NoopAgentEventSink(),
+                permit
+        ));
+
+        assertThat(thrown).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("run context primaryProvider missing");
         assertThat(trajectoryStore.statusByRun.get(runId)).isEqualTo(RunStatus.WAITING_USER_CONFIRMATION);
         assertThat(trajectoryStore.messagesByRun.get(runId)).isEmpty();
     }
@@ -329,6 +397,9 @@ class DefaultAgentLoopRunContextTest {
                 runId,
                 List.of("query_order"),
                 "deepseek-reasoner",
+                "deepseek",
+                "qwen",
+                "{}",
                 10,
                 null,
                 null

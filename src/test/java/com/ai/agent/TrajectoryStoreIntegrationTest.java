@@ -96,6 +96,9 @@ class TrajectoryStoreIntegrationTest {
                 runId,
                 List.of("cancel_order", "query_order"),
                 "deepseek-chat",
+                "deepseek",
+                "qwen",
+                "{}",
                 3,
                 null,
                 null
@@ -106,6 +109,9 @@ class TrajectoryStoreIntegrationTest {
         assertThat(loaded.runId()).isEqualTo(runId);
         assertThat(loaded.effectiveAllowedTools()).containsExactly("cancel_order", "query_order");
         assertThat(loaded.model()).isEqualTo("deepseek-chat");
+        assertThat(loaded.primaryProvider()).isEqualTo("deepseek");
+        assertThat(loaded.fallbackProvider()).isEqualTo("qwen");
+        assertThat(loaded.providerOptions()).isEqualTo("{}");
         assertThat(loaded.maxTurns()).isEqualTo(3);
         assertThat(loaded.createdAt()).isNotNull();
         assertThat(loaded.updatedAt()).isNotNull();
