@@ -418,11 +418,28 @@ V2 必须按 `V2.0 -> V2.1 -> V2.2` 顺序推进，里程碑内部按 `task.md` 
 - full：`MYSQL_PASSWORD=*** mvn test`，120 tests，0 failures，0 errors，`BUILD SUCCESS`。
 - `java-alibaba-review` 复审：未发现阻断 issue；确认 Redis budget key TTL、fallback budget rejection 无 orphan event、helper 构造器不再绕过预算。
 
-### V20-06 PENDING
+### V20-06 IN_PROGRESS
 
 - 写入范围：`ContextViewBuilder`、`ProviderViewMessage`、`LlmAttemptService` 调用前接入 view、复用 `TranscriptPairValidator`。
 - 前置：`V20-02`。
 - 关注点：原始 trajectory 不能被改写；compact 前后都要走 pair validator。
+
+启动记录：
+
+- 启动时间：2026-05-01 23:12 CST。
+- 工程判断：先做 provider view 的明确边界，不急着 compact；后续 `LargeResultSpiller / MicroCompactor / SummaryCompactor` 都只作用于 provider view，不直接改 MySQL raw trajectory。
+- TDD 目标：builder 从 `TrajectoryReader` 加载 raw messages；返回 copy；raw/view 都过 `TranscriptPairValidator`；orphan tool result fail fast。
+
+集成记录：
+
+- 新增 `ContextViewBuilder` 与 `ProviderContextView`，provider 请求前统一从 `TrajectoryReader` 加载 raw messages，先校验 raw transcript，再复制成 provider view 并再次校验。
+- `AgentTurnOrchestrator` 不再直接依赖 `TrajectoryReader` / `TranscriptPairValidator`，改为通过 `ContextViewBuilder` 获得 provider messages；MySQL 原始 trajectory 不被修改。
+- 踩坑记录：review agent 提醒 provider view 当前在 attempt 层仍被拆成 `List<LlmMessage>`，类型边界还不是强约束；V20-07/V20-08 接 compactor 时优先把 compaction 入口收敛在 `ContextViewBuilder`，避免新增调用方绕过 builder。
+- targeted：`MYSQL_PASSWORD=*** mvn -Dtest=com.ai.agent.llm.ContextViewBuilderTest,com.ai.agent.api.AgentTurnOrchestratorBudgetTest test`，4 tests，0 failures，`BUILD SUCCESS`。
+- full：`MYSQL_PASSWORD=*** mvn test`，122 tests，0 failures，0 errors，`BUILD SUCCESS`。
+- `java-alibaba-review`：未发现 P0/P1/P2 阻断 issue。
+
+状态：DONE。
 
 ### V20-07 PENDING
 

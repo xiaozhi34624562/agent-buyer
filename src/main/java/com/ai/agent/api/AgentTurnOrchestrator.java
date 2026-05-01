@@ -2,12 +2,11 @@ package com.ai.agent.api;
 
 import com.ai.agent.config.AgentProperties;
 import com.ai.agent.domain.RunStatus;
+import com.ai.agent.llm.ContextViewBuilder;
 import com.ai.agent.llm.LlmMessage;
 import com.ai.agent.llm.LlmStreamResult;
-import com.ai.agent.llm.TranscriptPairValidator;
 import com.ai.agent.tool.Tool;
 import com.ai.agent.trajectory.RunContext;
-import com.ai.agent.trajectory.TrajectoryReader;
 import com.ai.agent.trajectory.TrajectoryStore;
 import com.ai.agent.util.Ids;
 import org.slf4j.Logger;
@@ -23,30 +22,27 @@ public final class AgentTurnOrchestrator {
     private static final Logger log = LoggerFactory.getLogger(AgentTurnOrchestrator.class);
 
     private final AgentProperties properties;
-    private final TranscriptPairValidator transcriptPairValidator;
+    private final ContextViewBuilder contextViewBuilder;
     private final LlmAttemptService llmAttemptService;
     private final ToolCallCoordinator toolCallCoordinator;
     private final TrajectoryStore trajectoryStore;
-    private final TrajectoryReader trajectoryReader;
     private final RunStateMachine stateMachine;
     private final AgentExecutionBudget executionBudget;
 
     public AgentTurnOrchestrator(
             AgentProperties properties,
-            TranscriptPairValidator transcriptPairValidator,
+            ContextViewBuilder contextViewBuilder,
             LlmAttemptService llmAttemptService,
             ToolCallCoordinator toolCallCoordinator,
             TrajectoryStore trajectoryStore,
-            TrajectoryReader trajectoryReader,
             RunStateMachine stateMachine,
             AgentExecutionBudget executionBudget
     ) {
         this.properties = properties;
-        this.transcriptPairValidator = transcriptPairValidator;
+        this.contextViewBuilder = contextViewBuilder;
         this.llmAttemptService = llmAttemptService;
         this.toolCallCoordinator = toolCallCoordinator;
         this.trajectoryStore = trajectoryStore;
-        this.trajectoryReader = trajectoryReader;
         this.stateMachine = stateMachine;
         this.executionBudget = executionBudget;
     }
@@ -81,8 +77,7 @@ public final class AgentTurnOrchestrator {
             }
 
             int turnNo = trajectoryStore.nextTurn(runId);
-            List<LlmMessage> messages = trajectoryReader.loadMessages(runId);
-            transcriptPairValidator.validate(messages);
+            List<LlmMessage> messages = contextViewBuilder.build(runId).messages();
             String attemptId = Ids.newId("att");
             try (MDC.MDCCloseable ignoredAttempt = MDC.putCloseable("attemptId", attemptId)) {
                 log.info("llm attempt started turnNo={} messageCount={} model={}", turnNo, messages.size(), model);

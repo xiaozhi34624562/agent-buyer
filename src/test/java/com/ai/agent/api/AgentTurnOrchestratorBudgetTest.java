@@ -3,6 +3,7 @@ package com.ai.agent.api;
 import com.ai.agent.config.AgentProperties;
 import com.ai.agent.domain.FinishReason;
 import com.ai.agent.domain.RunStatus;
+import com.ai.agent.llm.ContextViewBuilder;
 import com.ai.agent.llm.LlmChatRequest;
 import com.ai.agent.llm.LlmMessage;
 import com.ai.agent.llm.LlmProviderAdapter;
@@ -92,7 +93,7 @@ class AgentTurnOrchestratorBudgetTest {
         ObjectMapper objectMapper = new ObjectMapper();
         return new AgentTurnOrchestrator(
                 properties,
-                new TranscriptPairValidator(),
+                new ContextViewBuilder(trajectoryStore, new TranscriptPairValidator()),
                 new LlmAttemptService(new LlmProviderAdapterRegistry(List.of(provider)), trajectoryStore, objectMapper),
                 new ToolCallCoordinator(
                         properties,
@@ -106,7 +107,6 @@ class AgentTurnOrchestratorBudgetTest {
                         new ToolResultCloser(trajectoryStore, trajectoryStore),
                         objectMapper
                 ),
-                trajectoryStore,
                 trajectoryStore,
                 new RunStateMachine(trajectoryStore),
                 new AgentExecutionBudget(properties, budgetStore)

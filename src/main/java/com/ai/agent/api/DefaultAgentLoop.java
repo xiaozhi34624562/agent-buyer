@@ -6,6 +6,7 @@ import com.ai.agent.llm.LlmMessage;
 import com.ai.agent.llm.LlmProviderAdapter;
 import com.ai.agent.llm.LlmProviderAdapterRegistry;
 import com.ai.agent.llm.PromptAssembler;
+import com.ai.agent.llm.ContextViewBuilder;
 import com.ai.agent.llm.TranscriptPairValidator;
 import com.ai.agent.tool.ConfirmTokenStore;
 import com.ai.agent.tool.RunEventSinkRegistry;
@@ -109,7 +110,7 @@ public final class DefaultAgentLoop implements AgentLoop {
                 runAccessManager,
                 new AgentTurnOrchestrator(
                         properties,
-                        transcriptPairValidator,
+                        new ContextViewBuilder(trajectoryReader, transcriptPairValidator),
                         new LlmAttemptService(new LlmProviderAdapterRegistry(List.of(providerAdapter)), trajectoryStore, objectMapper),
                         new ToolCallCoordinator(
                                 properties,
@@ -123,7 +124,6 @@ public final class DefaultAgentLoop implements AgentLoop {
                                 objectMapper
                         ),
                         trajectoryStore,
-                        trajectoryReader,
                         new RunStateMachine(trajectoryStore),
                         new AgentExecutionBudget(properties, new LocalRunLlmCallBudgetStore())
                 ),
