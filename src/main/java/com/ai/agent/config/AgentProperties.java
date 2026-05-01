@@ -19,6 +19,7 @@ public class AgentProperties {
     private Llm llm = new Llm();
     private RateLimit rateLimit = new RateLimit();
     private RequestPolicy requestPolicy = new RequestPolicy();
+    private Context context = new Context();
 
     public String getRedisKeyPrefix() {
         return redisKeyPrefix;
@@ -114,6 +115,14 @@ public class AgentProperties {
 
     public void setRequestPolicy(RequestPolicy requestPolicy) {
         this.requestPolicy = requestPolicy;
+    }
+
+    public Context getContext() {
+        return context;
+    }
+
+    public void setContext(Context context) {
+        this.context = context == null ? new Context() : context;
     }
 
     public static class AgentLoop {
@@ -452,6 +461,36 @@ public class AgentProperties {
 
         public void setAllowedModels(List<String> allowedModels) {
             this.allowedModels = allowedModels == null ? List.of() : List.copyOf(allowedModels);
+        }
+    }
+
+    public static class Context {
+        private int largeResultThresholdTokens = 2_000;
+        private int largeResultHeadTokens = 200;
+        private int largeResultTailTokens = 200;
+
+        public int getLargeResultThresholdTokens() {
+            return largeResultThresholdTokens;
+        }
+
+        public void setLargeResultThresholdTokens(int largeResultThresholdTokens) {
+            this.largeResultThresholdTokens = largeResultThresholdTokens;
+        }
+
+        public int getLargeResultHeadTokens() {
+            return largeResultHeadTokens;
+        }
+
+        public void setLargeResultHeadTokens(int largeResultHeadTokens) {
+            this.largeResultHeadTokens = largeResultHeadTokens;
+        }
+
+        public int getLargeResultTailTokens() {
+            return largeResultTailTokens;
+        }
+
+        public void setLargeResultTailTokens(int largeResultTailTokens) {
+            this.largeResultTailTokens = largeResultTailTokens;
         }
     }
 

@@ -10,6 +10,8 @@ import com.ai.agent.llm.LlmProviderAdapter;
 import com.ai.agent.llm.LlmProviderAdapterRegistry;
 import com.ai.agent.llm.LlmStreamListener;
 import com.ai.agent.llm.LlmStreamResult;
+import com.ai.agent.llm.LargeResultSpiller;
+import com.ai.agent.llm.TokenEstimator;
 import com.ai.agent.llm.TranscriptPairValidator;
 import com.ai.agent.tool.CancelReason;
 import com.ai.agent.tool.StartedTool;
@@ -93,7 +95,11 @@ class AgentTurnOrchestratorBudgetTest {
         ObjectMapper objectMapper = new ObjectMapper();
         return new AgentTurnOrchestrator(
                 properties,
-                new ContextViewBuilder(trajectoryStore, new TranscriptPairValidator()),
+                new ContextViewBuilder(
+                        trajectoryStore,
+                        new TranscriptPairValidator(),
+                        new LargeResultSpiller(properties, new TokenEstimator())
+                ),
                 new LlmAttemptService(new LlmProviderAdapterRegistry(List.of(provider)), trajectoryStore, objectMapper),
                 new ToolCallCoordinator(
                         properties,

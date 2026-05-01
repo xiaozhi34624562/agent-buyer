@@ -1,5 +1,6 @@
 package com.ai.agent.llm;
 
+import com.ai.agent.config.AgentProperties;
 import com.ai.agent.tool.ToolCall;
 import com.ai.agent.trajectory.TrajectoryReader;
 import org.junit.jupiter.api.Test;
@@ -17,7 +18,7 @@ class ContextViewBuilderTest {
         reader.messages.add(LlmMessage.user("u1", "cancel order"));
         reader.messages.add(LlmMessage.assistant("a1", null, List.of(new ToolCallMessage("call_1", "query_order", "{}"))));
         reader.messages.add(LlmMessage.tool("t1", "call_1", "{\"ok\":true}"));
-        ContextViewBuilder builder = new ContextViewBuilder(reader, new TranscriptPairValidator());
+        ContextViewBuilder builder = new ContextViewBuilder(reader, new TranscriptPairValidator(), noOpSpiller());
 
         ProviderContextView view = builder.build("run-1");
 
@@ -31,11 +32,53 @@ class ContextViewBuilderTest {
     void rejectsInvalidRawTrajectoryBeforeProviderRequest() {
         FakeTrajectoryReader reader = new FakeTrajectoryReader();
         reader.messages.add(LlmMessage.tool("t1", "missing", "{}"));
-        ContextViewBuilder builder = new ContextViewBuilder(reader, new TranscriptPairValidator());
+        ContextViewBuilder builder = new ContextViewBuilder(reader, new TranscriptPairValidator(), noOpSpiller());
 
         assertThatThrownBy(() -> builder.build("run-1"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("orphan tool result");
+    }
+
+    @Test
+    void spillsLargeToolResultAfterRawValidationWithoutMutatingRawTrajectory() {
+        FakeTrajectoryReader reader = new FakeTrajectoryReader();
+        reader.messages.add(LlmMessage.assistant("a1", null, List.of(new ToolCallMessage("call_1", "query_order", "{}"))));
+        LlmMessage rawTool = LlmMessage.tool("t1", "call_1", tokenText(18));
+        reader.messages.add(rawTool);
+        AgentProperties properties = new AgentProperties();
+        properties.getContext().setLargeResultThresholdTokens(12);
+        properties.getContext().setLargeResultHeadTokens(3);
+        properties.getContext().setLargeResultTailTokens(2);
+        ContextViewBuilder builder = new ContextViewBuilder(
+                reader,
+                new TranscriptPairValidator(),
+                new LargeResultSpiller(properties, new TokenEstimator())
+        );
+
+        ProviderContextView view = builder.build("run-1");
+
+        new TranscriptPairValidator().validate(view.messages());
+        assertThat(view.messages().get(1).content())
+                .contains("<resultPath>trajectory://runs/run-1/tool-results/call_1/full</resultPath>");
+        assertThat(rawTool.content()).isEqualTo(tokenText(18));
+        assertThat(reader.messages.get(1).content()).isEqualTo(tokenText(18));
+    }
+
+    private static LargeResultSpiller noOpSpiller() {
+        AgentProperties properties = new AgentProperties();
+        properties.getContext().setLargeResultThresholdTokens(Integer.MAX_VALUE);
+        return new LargeResultSpiller(properties, new TokenEstimator());
+    }
+
+    private static String tokenText(int tokenCount) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < tokenCount; i++) {
+            if (i > 0) {
+                builder.append(' ');
+            }
+            builder.append("tok").append(i);
+        }
+        return builder.toString();
     }
 
     private static final class FakeTrajectoryReader implements TrajectoryReader {

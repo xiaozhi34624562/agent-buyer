@@ -441,11 +441,30 @@ V2 必须按 `V2.0 -> V2.1 -> V2.2` 顺序推进，里程碑内部按 `task.md` 
 
 状态：DONE。
 
-### V20-07 PENDING
+### V20-07 DONE
 
 - 写入范围：`LargeResultSpiller`、`ContextViewBuilder` 接入；不动 MySQL 原始结果。
 - 前置：`V20-06`。
 - 关注点：threshold（2000 token）从配置读；resultPath 是 logical path，不引入对象存储。
+
+启动记录：
+
+- 启动时间：2026-05-01 23:18 CST。
+- 工程判断：large spill 只改变 provider view 中的 tool result 文本，不能改 MySQL raw message；resultPath 使用可追溯的 logical path，V2.0 不引入对象存储。
+- TDD 目标：超过 2000 token 的 tool result 保留头 200 token、尾 200 token，中间插入 `<resultPath>`；未超过阈值不改；compact 后 transcript pairing 仍通过。
+
+集成记录：
+
+- 完成时间：2026-05-01 23:20 CST。
+- 新增 `LargeResultSpiller` 与 `TokenEstimator`，从 `AgentProperties.context` 读取 `large-result-threshold-tokens=2000`、`large-result-head-tokens=200`、`large-result-tail-tokens=200`；`application.yml` 已补默认配置。
+- `ContextViewBuilder` 在 raw transcript 通过 `TranscriptPairValidator` 后对 provider view copy 执行 large result spill，再校验最终 provider view；MySQL raw trajectory message 不删除、不修改。
+- `resultPath` 使用 V2.0 logical path：`trajectory://runs/{runId}/tool-results/{toolUseId}/full`，未引入对象存储。
+- TDD 验证：先看到 `LargeResultSpillerTest,ContextViewBuilderTest` 因缺失 spiller/config 编译失败；实现后同一测试集 `Tests run: 5, Failures: 0, Errors: 0, Skipped: 0`。
+- review gate 发现 `TokenEstimator` 对“带空白 + 超长 segment”的 pretty JSON/blob 低估 token；已先补红测 `spillsPrettyJsonContainingLongWhitespaceSeparatedValue`，再改为按 segment 长度估算。
+- targeted：`MYSQL_PASSWORD=*** mvn -Dtest=com.ai.agent.llm.LargeResultSpillerTest,com.ai.agent.llm.ContextViewBuilderTest,com.ai.agent.api.AgentTurnOrchestratorBudgetTest test`，8 tests，0 failures，`BUILD SUCCESS`。
+- full：`MYSQL_PASSWORD=*** mvn test`，126 tests，0 failures，0 errors，`BUILD SUCCESS`。
+- 踩坑记录：review/subagent 如果没有带 `MYSQL_PASSWORD`，Spring 集成测试会以 root 空密码连接 MySQL 并失败；本项目全量回归统一使用 `MYSQL_PASSWORD=*** mvn test`。
+- `java-alibaba-review` 复审：未发现 P0/P1/P2 阻断 issue。
 
 ### V20-08 PENDING
 

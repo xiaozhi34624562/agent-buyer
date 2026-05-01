@@ -62,3 +62,7 @@ agent:
   rate-limit:
     runs-per-user-per-minute: 5
     tokens-per-user-per-day: 100000
+  context:
+    large-result-threshold-tokens: 2000
+    large-result-head-tokens: 200
+    large-result-tail-tokens: 200
