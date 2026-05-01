@@ -39,4 +39,7 @@ public interface TrajectoryWriter {
     String appendAssistantAndToolCalls(String runId, LlmMessage assistant, List<ToolCall> toolCalls);
 
     void writeToolResult(String runId, String toolUseId, ToolTerminal terminal);
+
+    default void writeAgentEvent(String runId, String eventType, String payloadJson) {
+    }
 }

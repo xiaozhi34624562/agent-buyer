@@ -493,6 +493,11 @@ class DefaultAgentLoopRunContextTest {
         }
 
         @Override
+        public String defaultModel() {
+            return "deepseek-reasoner";
+        }
+
+        @Override
         public LlmStreamResult streamChat(LlmChatRequest request, LlmStreamListener listener) {
             requests.add(request);
             if (requests.size() == 1) {

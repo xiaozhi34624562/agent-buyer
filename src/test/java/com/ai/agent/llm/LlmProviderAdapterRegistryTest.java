@@ -53,6 +53,11 @@ class LlmProviderAdapterRegistryTest {
 
     private record FakeProvider(String providerName) implements LlmProviderAdapter {
         @Override
+        public String defaultModel() {
+            return providerName + "-model";
+        }
+
+        @Override
         public LlmStreamResult streamChat(LlmChatRequest request, LlmStreamListener listener) {
             return new LlmStreamResult("ok", List.of(), FinishReason.STOP, null, null);
         }

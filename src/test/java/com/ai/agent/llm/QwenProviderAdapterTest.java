@@ -82,7 +82,7 @@ class QwenProviderAdapterTest {
 
     @Test
     void mapsBadRequestToStableNonRetryableException() throws Exception {
-        startServer(400, "{\"error\":{\"message\":\"bad request\"}}");
+        startServer(400, "{\"error\":{\"message\":\"bad request secret prompt fragment\"}}");
         QwenProviderAdapter adapter = new QwenProviderAdapter(
                 qwenProperties(),
                 new QwenCompatibilityProfile(objectMapper),
@@ -91,15 +91,19 @@ class QwenProviderAdapterTest {
 
         assertThatThrownBy(() -> adapter.streamChat(request(), ignored -> {
         }))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOfSatisfying(ProviderCallException.class,
+                        e -> {
+                            assertThat(e.type()).isEqualTo(ProviderErrorType.NON_RETRYABLE);
+                            assertThat(e.statusCode()).isEqualTo(400);
+                        })
                 .hasMessageContaining("Qwen status 400")
-                .hasMessageContaining("bad request");
+                .hasMessageNotContaining("secret prompt fragment");
         assertThat(requestCount).hasValue(1);
     }
 
     @Test
     void retriesServerErrorsBeforeFailing() throws Exception {
-        startServer(500, "{\"error\":{\"message\":\"temporary\"}}");
+        startServer(500, "{\"error\":{\"message\":\"temporary secret prompt fragment\"}}");
         QwenProviderAdapter adapter = new QwenProviderAdapter(
                 qwenProperties(),
                 new QwenCompatibilityProfile(objectMapper),
@@ -108,9 +112,13 @@ class QwenProviderAdapterTest {
 
         assertThatThrownBy(() -> adapter.streamChat(request(), ignored -> {
         }))
-                .isInstanceOf(RuntimeException.class)
+                .isInstanceOfSatisfying(ProviderCallException.class,
+                        e -> {
+                            assertThat(e.type()).isEqualTo(ProviderErrorType.RETRYABLE_PRE_STREAM);
+                            assertThat(e.statusCode()).isEqualTo(500);
+                        })
                 .hasMessageContaining("Qwen retryable status 500")
-                .hasMessageContaining("temporary");
+                .hasMessageNotContaining("secret prompt fragment");
         assertThat(requestCount).hasValue(3);
     }
 

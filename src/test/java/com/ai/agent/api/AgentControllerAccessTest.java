@@ -928,6 +928,11 @@ class AgentControllerAccessTest {
         }
 
         @Override
+        public String defaultModel() {
+            return "deepseek-reasoner";
+        }
+
+        @Override
         public LlmStreamResult streamChat(LlmChatRequest request, LlmStreamListener listener) {
             streamChatCount++;
             if (beforeReturn != null) {

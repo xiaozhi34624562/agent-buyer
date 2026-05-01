@@ -88,7 +88,7 @@ public final class AgentTurnOrchestrator {
                             runId,
                             turnNo,
                             attemptId,
-                            runContext.primaryProvider(),
+                            runContext,
                             model,
                             params,
                             messages,

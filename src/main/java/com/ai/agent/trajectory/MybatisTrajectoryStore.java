@@ -174,6 +174,16 @@ public class MybatisTrajectoryStore implements TrajectoryStore, TrajectoryReader
     }
 
     @Override
+    public void writeAgentEvent(String runId, String eventType, String payloadJson) {
+        AgentEventEntity entity = new AgentEventEntity();
+        entity.setEventId(Ids.newId("evt"));
+        entity.setRunId(runId);
+        entity.setEventType(eventType);
+        entity.setPayloadJson(payloadJson);
+        eventMapper.insert(entity);
+    }
+
+    @Override
     public void writeToolCall(String messageId, ToolCall call) {
         toolCallMapper.insert(toEntity(messageId, call));
     }

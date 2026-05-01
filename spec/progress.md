@@ -349,11 +349,27 @@ V2 必须按 `V2.0 -> V2.1 -> V2.2` 顺序推进，里程碑内部按 `task.md` 
 - full：`MYSQL_PASSWORD=*** mvn test`，106 tests，0 failures，0 errors，`BUILD SUCCESS`。
 - `java-alibaba-review` 复审：未发现 P0/P1/P2；确认 Qwen adapter/profile/config 与 DeepSeek 隔离，默认入口暂不开放 `qwen-plus`。
 
-### V20-04 PENDING
+### V20-04 IN_PROGRESS
 
 - 写入范围：`ProviderFallbackPolicy`、`LlmAttemptService` fallback 分支、`agent_llm_attempt` 写入扩展。
 - 前置：`V20-03`。
 - 关注点：建连前才允许 fallback；stream 已写入 tool delta 后必须禁止 fallback（这是 V2 约束的核心安全边界）；fallback 选型只能从 RunContext 读取。
+
+启动记录：
+
+- 启动时间：2026-05-01 22:45 CST。
+- owner：主 agent 负责 fallback 语义验收；worker 负责 `ProviderFallbackPolicy`、异常分类、`LlmAttemptService` fallback 分支与测试。
+- TDD 目标：primary retryable pre-stream failure fallback 到 RunContext.fallbackProvider；unknown/disabled fallback fail closed；stream 已产生 delta 后不 fallback；两个 attempt 都写 trajectory。
+
+集成记录：
+
+- worker 已完成 `ProviderCallException` / `ProviderErrorType` / `ProviderFallbackPolicy`、provider 异常分类、`LlmAttemptService` fallback attempt 与 `llm_fallback` event。
+- 主 agent 集成时发现 fallback 不能沿用 primary request model，否则会把 `deepseek-reasoner` 打给 Qwen；修复为 primary 使用请求模型，fallback 使用 fallback provider 的 `defaultModel()`。
+- review gate 发现 provider 4xx/429/5xx 原始 body 会进入长期 trajectory；已改为关闭错误响应 body，不拼接 body，只持久化 `providerErrorType` / `statusCode` / 稳定 message。
+- 补 `DeepSeekProviderAdapterTest`，覆盖 400 非重试、500 重试前置失败、malformed stream -> `STREAM_STARTED`；Qwen 测试同步断言错误 body 不泄漏。
+- targeted：`mvn -Dtest=com.ai.agent.llm.QwenProviderAdapterTest,com.ai.agent.llm.DeepSeekProviderAdapterTest,com.ai.agent.api.LlmAttemptServiceTest test`，15 tests，0 failures，`BUILD SUCCESS`。
+- full：`MYSQL_PASSWORD=*** mvn test`，114 tests，0 failures，0 errors，`BUILD SUCCESS`。
+- `java-alibaba-review` 复审：未发现阻断 issue；残余提醒是后续新增 provider 也必须遵守 `ProviderCallException.message` 不带原始 body 的约束。
 
 ### V20-04a DONE
 

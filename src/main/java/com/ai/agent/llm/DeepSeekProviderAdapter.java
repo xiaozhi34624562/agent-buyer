@@ -48,6 +48,11 @@ public final class DeepSeekProviderAdapter implements LlmProviderAdapter {
     }
 
     @Override
+    public String defaultModel() {
+        return properties.getLlm().getDeepseek().getDefaultModel();
+    }
+
+    @Override
     public LlmStreamResult streamChat(LlmChatRequest request, LlmStreamListener listener) {
         String apiKey = properties.getLlm().getDeepseek().getApiKey();
         if (apiKey == null || apiKey.isBlank()) {
@@ -57,7 +62,10 @@ public final class DeepSeekProviderAdapter implements LlmProviderAdapter {
         for (int attempt = 0; attempt <= MAX_CONNECT_RETRIES; attempt++) {
             try {
                 return doStream(request, listener, apiKey);
-            } catch (RetryableConnectException e) {
+            } catch (ProviderCallException e) {
+                if (e.type() != ProviderErrorType.RETRYABLE_PRE_STREAM) {
+                    throw e;
+                }
                 last = e;
                 sleepBackoff(attempt);
             }
@@ -78,19 +86,27 @@ public final class DeepSeekProviderAdapter implements LlmProviderAdapter {
         try {
             response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofLines());
         } catch (IOException e) {
-            throw new RetryableConnectException("DeepSeek connection failed", e);
+            throw new ProviderCallException(ProviderErrorType.RETRYABLE_PRE_STREAM, "DeepSeek connection failed", e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("DeepSeek request interrupted", e);
+            throw new ProviderCallException(ProviderErrorType.NON_RETRYABLE, "DeepSeek request interrupted", e);
         }
 
         if (response.statusCode() == 429 || response.statusCode() >= 500) {
-            String body = String.join("\n", response.body().toList());
-            throw new RetryableConnectException("DeepSeek retryable status " + response.statusCode() + ": " + body);
+            closeErrorBody(response);
+            throw new ProviderCallException(
+                    ProviderErrorType.RETRYABLE_PRE_STREAM,
+                    "DeepSeek retryable status " + response.statusCode(),
+                    response.statusCode()
+            );
         }
         if (response.statusCode() >= 400) {
-            String body = String.join("\n", response.body().toList());
-            throw new IllegalStateException("DeepSeek status " + response.statusCode() + ": " + body);
+            closeErrorBody(response);
+            throw new ProviderCallException(
+                    ProviderErrorType.NON_RETRYABLE,
+                    "DeepSeek status " + response.statusCode(),
+                    response.statusCode()
+            );
         }
 
         StringBuilder content = new StringBuilder();
@@ -145,7 +161,11 @@ public final class DeepSeekProviderAdapter implements LlmProviderAdapter {
                 }
             });
         } catch (RuntimeException e) {
-            throw new IllegalStateException("DeepSeek stream failed after headers were received", e);
+            throw new ProviderCallException(
+                    ProviderErrorType.STREAM_STARTED,
+                    "DeepSeek stream failed after headers were received",
+                    e
+            );
         }
 
         List<ToolCallMessage> toolCalls = toolCallAssembler.complete();
@@ -246,6 +266,12 @@ public final class DeepSeekProviderAdapter implements LlmProviderAdapter {
         return payload.replaceAll("sk-[A-Za-z0-9_-]{12,}", "sk-***");
     }
 
+    private void closeErrorBody(HttpResponse<java.util.stream.Stream<String>> response) {
+        try (java.util.stream.Stream<String> ignored = response.body()) {
+            // Close provider error streams without storing potentially sensitive body content.
+        }
+    }
+
     private void sleepBackoff(int attempt) {
         if (attempt >= MAX_CONNECT_RETRIES) {
             return;
@@ -259,13 +285,4 @@ public final class DeepSeekProviderAdapter implements LlmProviderAdapter {
         }
     }
 
-    private static final class RetryableConnectException extends RuntimeException {
-        private RetryableConnectException(String message) {
-            super(message);
-        }
-
-        private RetryableConnectException(String message, Throwable cause) {
-            super(message, cause);
-        }
-    }
 }
