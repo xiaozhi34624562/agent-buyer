@@ -209,6 +209,7 @@ public class AgentProperties {
     public static class Llm {
         private String provider = "deepseek";
         private DeepSeek deepseek = new DeepSeek();
+        private Qwen qwen = new Qwen();
 
         public String getProvider() {
             return provider;
@@ -225,12 +226,59 @@ public class AgentProperties {
         public void setDeepseek(DeepSeek deepseek) {
             this.deepseek = deepseek;
         }
+
+        public Qwen getQwen() {
+            return qwen;
+        }
+
+        public void setQwen(Qwen qwen) {
+            this.qwen = qwen;
+        }
     }
 
     public static class DeepSeek {
         private String baseUrl = "https://api.deepseek.com/v1";
         private String apiKey = "";
         private String defaultModel = "deepseek-reasoner";
+        private Duration requestTimeout = Duration.ofSeconds(60);
+
+        public String getBaseUrl() {
+            return baseUrl;
+        }
+
+        public void setBaseUrl(String baseUrl) {
+            this.baseUrl = baseUrl;
+        }
+
+        public String getApiKey() {
+            return apiKey;
+        }
+
+        public void setApiKey(String apiKey) {
+            this.apiKey = apiKey;
+        }
+
+        public String getDefaultModel() {
+            return defaultModel;
+        }
+
+        public void setDefaultModel(String defaultModel) {
+            this.defaultModel = defaultModel;
+        }
+
+        public Duration getRequestTimeout() {
+            return requestTimeout;
+        }
+
+        public void setRequestTimeout(Duration requestTimeout) {
+            this.requestTimeout = requestTimeout;
+        }
+    }
+
+    public static class Qwen {
+        private String baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+        private String apiKey = "";
+        private String defaultModel = "qwen-plus";
         private Duration requestTimeout = Duration.ofSeconds(60);
 
         public String getBaseUrl() {

@@ -98,6 +98,15 @@ class AgentRequestPolicyTest {
     }
 
     @Test
+    void defaultPolicyDoesNotExposeQwenModelBeforeProviderRoutingExists() {
+        AgentRequestPolicy policy = new AgentRequestPolicy(new AgentProperties());
+
+        assertThatThrownBy(() -> policy.validateCreateRun(requestWith(new LlmParams("qwen-plus", 0.7, 1024, 3))))
+                .isInstanceOf(AgentRequestPolicy.InvalidAgentRequestException.class)
+                .hasMessage("model is not allowed");
+    }
+
+    @Test
     void rejectsContinuationMessageExceedingContentLimit() {
         AgentProperties properties = new AgentProperties();
         properties.getRequestPolicy().setMaxContentChars(3);

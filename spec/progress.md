@@ -328,11 +328,26 @@ V2 必须按 `V2.0 -> V2.1 -> V2.2` 顺序推进，里程碑内部按 `task.md` 
 - 最终 targeted：`mvn -Dtest=com.ai.agent.llm.LlmProviderAdapterRegistryTest,com.ai.agent.api.LlmAttemptServiceTest test`，6 tests，0 failures，`BUILD SUCCESS`。
 - 最终 full：`MYSQL_PASSWORD=*** mvn test`，98 tests，0 failures，0 errors，`BUILD SUCCESS`。
 
-### V20-03 PENDING
+### V20-03 DONE
 
 - 写入范围：`QwenProviderAdapter`、`QwenCompatibilityProfile`、`config` 增加 Qwen base-url/api-key/model、单元测试。
 - 前置：`V20-02`。
 - 关注点：Qwen stream tool delta 组装；error mapping 与 DeepSeek 行为对齐；不污染 DeepSeek profile。
+
+启动记录：
+
+- 启动时间：2026-05-01 22:35 CST。
+- owner：主 agent 负责验收与 review；worker 负责 Qwen adapter/profile/config/test。
+- TDD 目标：先补 Qwen profile tool schema 转换、Qwen streaming tool delta assembler、Qwen usage/finish reason/error mapping 的红测，再实现。
+
+集成记录：
+
+- worker 已完成 `QwenProviderAdapter`、`QwenCompatibilityProfile`、`agent.llm.qwen` 配置和本地 fake SSE provider 测试。
+- review gate 发现 `qwen-plus` 被加入默认 allowed models 会造成 “qwen model -> deepseek provider” 错配；已移除默认开放，并补 `AgentRequestPolicyTest`，在 provider routing 真正实现前 fail closed。
+- review gate 发现 Qwen finish/error mapping 覆盖不足；已补 missing API key、500 retry、`length`、`content_filter` 测试。
+- targeted：`mvn -Dtest=com.ai.agent.api.AgentRequestPolicyTest,com.ai.agent.llm.QwenProviderAdapterTest,com.ai.agent.llm.QwenCompatibilityProfileTest,com.ai.agent.llm.LlmProviderAdapterRegistryTest test`，20 tests，0 failures，`BUILD SUCCESS`。
+- full：`MYSQL_PASSWORD=*** mvn test`，106 tests，0 failures，0 errors，`BUILD SUCCESS`。
+- `java-alibaba-review` 复审：未发现 P0/P1/P2；确认 Qwen adapter/profile/config 与 DeepSeek 隔离，默认入口暂不开放 `qwen-plus`。
 
 ### V20-04 PENDING
 
