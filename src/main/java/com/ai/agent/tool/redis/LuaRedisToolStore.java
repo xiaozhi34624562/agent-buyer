@@ -15,6 +15,7 @@ import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -330,7 +331,18 @@ public class LuaRedisToolStore implements RedisToolStore {
     @Override
     public Set<String> activeRunIds() {
         Set<String> runIds = redisTemplate.opsForSet().members(keys.activeRuns());
-        return runIds == null ? Set.of() : runIds;
+        if (runIds == null || runIds.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> active = new LinkedHashSet<>();
+        for (String runId : runIds) {
+            if (hasPendingOrRunningTools(runId)) {
+                active.add(runId);
+            } else {
+                redisTemplate.opsForSet().remove(keys.activeRuns(), runId);
+            }
+        }
+        return active;
     }
 
     @Override
@@ -345,6 +357,20 @@ public class LuaRedisToolStore implements RedisToolStore {
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("invalid redis tool state", e);
         }
+    }
+
+    private boolean hasPendingOrRunningTools(String runId) {
+        List<Object> values = redisTemplate.opsForHash().values(keys.tools(runId));
+        if (values == null || values.isEmpty()) {
+            return false;
+        }
+        for (Object value : values) {
+            ToolCallRuntimeState state = readState(value.toString());
+            if (state.status() == ToolStatus.WAITING || state.status() == ToolStatus.RUNNING) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private ToolTerminal readTerminal(String json) {

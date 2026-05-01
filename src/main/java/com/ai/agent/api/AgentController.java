@@ -3,7 +3,6 @@ package com.ai.agent.api;
 import com.ai.agent.trajectory.TrajectoryStore;
 import com.ai.agent.domain.RunStatus;
 import com.ai.agent.tool.redis.RedisToolStore;
-import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
@@ -34,7 +33,8 @@ public class AgentController {
     private final ExecutorService agentExecutor;
     private final ScheduledExecutorService sseScheduler;
     private final RedisToolStore redisToolStore;
-    private final MeterRegistry meterRegistry;
+    private final SseMetrics sseMetrics;
+    private final AgentEventRecorder eventRecorder;
 
     public AgentController(
             AgentLoop agentLoop,
@@ -45,7 +45,8 @@ public class AgentController {
             @Qualifier("agentExecutor") ExecutorService agentExecutor,
             @Qualifier("sseScheduler") ScheduledExecutorService sseScheduler,
             RedisToolStore redisToolStore,
-            MeterRegistry meterRegistry
+            SseMetrics sseMetrics,
+            AgentEventRecorder eventRecorder
     ) {
         this.agentLoop = agentLoop;
         this.admissionController = admissionController;
@@ -55,7 +56,8 @@ public class AgentController {
         this.agentExecutor = agentExecutor;
         this.sseScheduler = sseScheduler;
         this.redisToolStore = redisToolStore;
-        this.meterRegistry = meterRegistry;
+        this.sseMetrics = sseMetrics;
+        this.eventRecorder = eventRecorder;
     }
 
     @PostMapping(value = "/runs", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -86,11 +88,7 @@ public class AgentController {
 
     @GetMapping("/runs/{runId}")
     public Map<String, Object> getRun(@PathVariable String runId) {
-        return Map.of(
-                "runId", runId,
-                "status", trajectoryStore.findRunStatus(runId),
-                "messages", trajectoryStore.loadMessages(runId)
-        );
+        return trajectoryStore.loadTrajectory(runId);
     }
 
     @PostMapping("/runs/{runId}/abort")
@@ -109,14 +107,15 @@ public class AgentController {
 
     private SseEmitter submitSse(Consumer<AgentEventSink> action) {
         SseEmitter emitter = new SseEmitter(310_000L);
-        SseAgentEventSink sink = new SseAgentEventSink(emitter, sseScheduler, meterRegistry);
+        SseAgentEventSink sseSink = new SseAgentEventSink(emitter, sseScheduler, sseMetrics);
+        AgentEventSink sink = new RecordingAgentEventSink(sseSink, eventRecorder);
         agentExecutor.submit(() -> {
             try {
                 action.accept(sink);
             } catch (Exception e) {
                 safeError(sink, e);
             } finally {
-                sink.close();
+                sseSink.close();
                 emitter.complete();
             }
         });

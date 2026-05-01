@@ -1,6 +1,5 @@
 package com.ai.agent.api;
 
-import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
@@ -12,22 +11,22 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class SseAgentEventSink implements AgentEventSink, AutoCloseable {
     private final SseEmitter emitter;
-    private final MeterRegistry meterRegistry;
+    private final SseMetrics metrics;
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private ScheduledFuture<?> pingTask;
 
     public SseAgentEventSink(
             SseEmitter emitter,
             ScheduledExecutorService scheduler,
-            MeterRegistry meterRegistry
+            SseMetrics metrics
     ) {
         this.emitter = emitter;
-        this.meterRegistry = meterRegistry;
-        meterRegistry.counter("agent.sse.connections.opened").increment();
+        this.metrics = metrics;
+        metrics.opened();
         this.pingTask = scheduler.scheduleAtFixedRate(this::sendPing, 15, 15, TimeUnit.SECONDS);
-        emitter.onCompletion(this::close);
-        emitter.onTimeout(this::close);
-        emitter.onError(error -> close());
+        emitter.onCompletion(() -> close("completion"));
+        emitter.onTimeout(() -> close("timeout"));
+        emitter.onError(error -> close("error"));
     }
 
     @Override
@@ -71,9 +70,9 @@ public final class SseAgentEventSink implements AgentEventSink, AutoCloseable {
                 }
                 emitter.send(SseEmitter.event().name(eventName).data(payload));
             }
-            meterRegistry.counter("agent.sse.events.sent", "event_type", eventName).increment();
+            metrics.eventSent(eventName);
         } catch (IOException e) {
-            close();
+            close("send_failed");
             throw new IllegalStateException("failed to send SSE event", e);
         }
     }
@@ -82,17 +81,21 @@ public final class SseAgentEventSink implements AgentEventSink, AutoCloseable {
         try {
             send("ping", Map.of("type", "ping"));
         } catch (RuntimeException ignored) {
-            close();
+            close("ping_failed");
         }
     }
 
     @Override
     public void close() {
+        close("server_close");
+    }
+
+    private void close(String reason) {
         if (closed.compareAndSet(false, true)) {
             if (pingTask != null) {
                 pingTask.cancel(false);
             }
-            meterRegistry.counter("agent.sse.connections.closed").increment();
+            metrics.closed(reason);
         }
     }
 }

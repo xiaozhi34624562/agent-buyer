@@ -15,17 +15,20 @@ public final class AgentShutdownManager {
     private final RunAdmissionController admissionController;
     private final ExecutorService agentExecutor;
     private final ExecutorService toolExecutor;
+    private final ExecutorService eventExecutor;
     private final ScheduledExecutorService sseScheduler;
 
     public AgentShutdownManager(
             RunAdmissionController admissionController,
             @Qualifier("agentExecutor") ExecutorService agentExecutor,
             @Qualifier("toolExecutor") ExecutorService toolExecutor,
+            @Qualifier("eventExecutor") ExecutorService eventExecutor,
             @Qualifier("sseScheduler") ScheduledExecutorService sseScheduler
     ) {
         this.admissionController = admissionController;
         this.agentExecutor = agentExecutor;
         this.toolExecutor = toolExecutor;
+        this.eventExecutor = eventExecutor;
         this.sseScheduler = sseScheduler;
     }
 
@@ -34,6 +37,7 @@ public final class AgentShutdownManager {
         admissionController.stopAccepting();
         gracefulShutdown(agentExecutor);
         gracefulShutdown(toolExecutor);
+        gracefulShutdown(eventExecutor);
         sseScheduler.shutdownNow();
     }
 

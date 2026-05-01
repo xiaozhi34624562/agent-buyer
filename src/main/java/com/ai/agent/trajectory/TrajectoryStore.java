@@ -7,6 +7,7 @@ import com.ai.agent.tool.ToolCall;
 import com.ai.agent.tool.ToolTerminal;
 
 import java.util.List;
+import java.util.Map;
 
 public interface TrajectoryStore {
     void createRun(String runId, String userId);
@@ -47,4 +48,6 @@ public interface TrajectoryStore {
     void writeToolResult(String runId, String toolUseId, ToolTerminal terminal);
 
     List<ToolCall> findToolCallsByRun(String runId);
+
+    Map<String, Object> loadTrajectory(String runId);
 }

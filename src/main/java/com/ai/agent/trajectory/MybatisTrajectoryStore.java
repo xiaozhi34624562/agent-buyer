@@ -8,16 +8,21 @@ import com.ai.agent.llm.ToolCallMessage;
 import com.ai.agent.persistence.entity.AgentLlmAttemptEntity;
 import com.ai.agent.persistence.entity.AgentMessageEntity;
 import com.ai.agent.persistence.entity.AgentRunEntity;
+import com.ai.agent.persistence.entity.AgentEventEntity;
 import com.ai.agent.persistence.entity.AgentToolCallTraceEntity;
+import com.ai.agent.persistence.entity.AgentToolProgressEntity;
 import com.ai.agent.persistence.entity.AgentToolResultTraceEntity;
+import com.ai.agent.persistence.mapper.AgentEventMapper;
 import com.ai.agent.persistence.mapper.AgentLlmAttemptMapper;
 import com.ai.agent.persistence.mapper.AgentMessageMapper;
 import com.ai.agent.persistence.mapper.AgentRunMapper;
 import com.ai.agent.persistence.mapper.AgentToolCallTraceMapper;
+import com.ai.agent.persistence.mapper.AgentToolProgressMapper;
 import com.ai.agent.persistence.mapper.AgentToolResultTraceMapper;
 import com.ai.agent.tool.ToolCall;
 import com.ai.agent.tool.ToolTerminal;
 import com.ai.agent.util.Ids;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -40,6 +45,8 @@ public class MybatisTrajectoryStore implements TrajectoryStore {
     private final AgentLlmAttemptMapper llmAttemptMapper;
     private final AgentToolCallTraceMapper toolCallMapper;
     private final AgentToolResultTraceMapper toolResultMapper;
+    private final AgentEventMapper eventMapper;
+    private final AgentToolProgressMapper progressMapper;
     private final ObjectMapper objectMapper;
 
     public MybatisTrajectoryStore(
@@ -48,6 +55,8 @@ public class MybatisTrajectoryStore implements TrajectoryStore {
             AgentLlmAttemptMapper llmAttemptMapper,
             AgentToolCallTraceMapper toolCallMapper,
             AgentToolResultTraceMapper toolResultMapper,
+            AgentEventMapper eventMapper,
+            AgentToolProgressMapper progressMapper,
             ObjectMapper objectMapper
     ) {
         this.runMapper = runMapper;
@@ -55,6 +64,8 @@ public class MybatisTrajectoryStore implements TrajectoryStore {
         this.llmAttemptMapper = llmAttemptMapper;
         this.toolCallMapper = toolCallMapper;
         this.toolResultMapper = toolResultMapper;
+        this.eventMapper = eventMapper;
+        this.progressMapper = progressMapper;
         this.objectMapper = objectMapper;
     }
 
@@ -182,6 +193,29 @@ public class MybatisTrajectoryStore implements TrajectoryStore {
         return toolCallMapper.findByRunId(runId).stream()
                 .map(this::toDomain)
                 .toList();
+    }
+
+    @Override
+    public Map<String, Object> loadTrajectory(String runId) {
+        AgentRunEntity run = runMapper.selectById(runId);
+        return Map.of(
+                "run", run,
+                "messages", messageMapper.findByRunId(runId),
+                "llmAttempts", llmAttemptMapper.selectList(new LambdaQueryWrapper<AgentLlmAttemptEntity>()
+                        .eq(AgentLlmAttemptEntity::getRunId, runId)
+                        .orderByAsc(AgentLlmAttemptEntity::getTurnNo)
+                        .orderByAsc(AgentLlmAttemptEntity::getStartedAt)),
+                "toolCalls", toolCallMapper.findByRunId(runId),
+                "toolResults", toolResultMapper.selectList(new LambdaQueryWrapper<AgentToolResultTraceEntity>()
+                        .eq(AgentToolResultTraceEntity::getRunId, runId)
+                        .orderByAsc(AgentToolResultTraceEntity::getCreatedAt)),
+                "events", eventMapper.selectList(new LambdaQueryWrapper<AgentEventEntity>()
+                        .eq(AgentEventEntity::getRunId, runId)
+                        .orderByAsc(AgentEventEntity::getCreatedAt)),
+                "toolProgress", progressMapper.selectList(new LambdaQueryWrapper<AgentToolProgressEntity>()
+                        .eq(AgentToolProgressEntity::getRunId, runId)
+                        .orderByAsc(AgentToolProgressEntity::getCreatedAt))
+        );
     }
 
     @Override

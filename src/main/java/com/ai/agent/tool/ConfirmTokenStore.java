@@ -22,16 +22,17 @@ public final class ConfirmTokenStore {
         this.objectMapper = objectMapper;
     }
 
-    public String create(String runId, String toolName, String argsHash) {
+    public String create(String runId, String userId, String toolName, String argsHash) {
         String token = Ids.newId("ct");
-        ConfirmToken value = new ConfirmToken(toolName, argsHash, Instant.now().plus(properties.getConfirmationTtl()).toEpochMilli());
+        ConfirmToken value = new ConfirmToken(userId, toolName, argsHash, Instant.now().plus(properties.getConfirmationTtl()).toEpochMilli());
         String key = key(runId);
+        removeMatchingActionTokens(key, userId, toolName, argsHash);
         redisTemplate.opsForHash().put(key, token, toJson(value));
         redisTemplate.expire(key, properties.getConfirmationTtl());
         return token;
     }
 
-    public boolean consume(String runId, String token, String toolName, String argsHash) {
+    public boolean consume(String runId, String userId, String token, String toolName, String argsHash) {
         if (token == null || token.isBlank()) {
             return false;
         }
@@ -45,11 +46,24 @@ public final class ConfirmTokenStore {
             redisTemplate.opsForHash().delete(key, token);
             return false;
         }
-        if (!stored.toolName().equals(toolName) || !stored.argsHash().equals(argsHash)) {
+        if (!stored.userId().equals(userId) || !stored.toolName().equals(toolName) || !stored.argsHash().equals(argsHash)) {
             return false;
         }
         redisTemplate.opsForHash().delete(key, token);
         return true;
+    }
+
+    public void clearRun(String runId) {
+        redisTemplate.delete(key(runId));
+    }
+
+    private void removeMatchingActionTokens(String key, String userId, String toolName, String argsHash) {
+        redisTemplate.opsForHash().entries(key).forEach((field, raw) -> {
+            ConfirmToken stored = fromJson(raw.toString());
+            if (stored.userId().equals(userId) && stored.toolName().equals(toolName) && stored.argsHash().equals(argsHash)) {
+                redisTemplate.opsForHash().delete(key, field);
+            }
+        });
     }
 
     private String key(String runId) {
@@ -72,6 +86,6 @@ public final class ConfirmTokenStore {
         }
     }
 
-    private record ConfirmToken(String toolName, String argsHash, long expiresAtMs) {
+    private record ConfirmToken(String userId, String toolName, String argsHash, long expiresAtMs) {
     }
 }

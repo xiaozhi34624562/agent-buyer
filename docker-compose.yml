@@ -1,0 +1,52 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: agent-buyer-compose-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:-agent_buyer_demo}
+      MYSQL_DATABASE: agent_buyer
+    ports:
+      - "${MYSQL_PORT:-3307}:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_PASSWORD:-agent_buyer_demo}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - agent_buyer_mysql:/var/lib/mysql
+
+  redis:
+    image: redis:7.2
+    container_name: agent-buyer-compose-redis
+    ports:
+      - "${REDIS_PORT:-6380}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - agent_buyer_redis:/data
+
+  agent-app:
+    build: .
+    container_name: agent-buyer-app
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      MYSQL_URL: jdbc:mysql://mysql:3306/agent_buyer?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      MYSQL_USERNAME: root
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-agent_buyer_demo}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?DEEPSEEK_API_KEY is required}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-reasoner}
+    ports:
+      - "${APP_PORT:-8080}:8080"
+
+volumes:
+  agent_buyer_mysql:
+  agent_buyer_redis:

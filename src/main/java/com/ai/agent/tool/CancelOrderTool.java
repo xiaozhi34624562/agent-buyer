@@ -96,7 +96,7 @@ public final class CancelOrderTool extends AbstractTool {
                 )));
             }
             String argsHash = argumentsHasher.hash(normalizedArgsJson);
-            String confirmToken = confirmTokenStore.create(ctx.runId(), schema().name(), argsHash);
+            String confirmToken = confirmTokenStore.create(ctx.runId(), ctx.userId(), schema().name(), argsHash);
             String result = objectMapper.writeValueAsString(Map.of(
                     "actionStatus", "PENDING_CONFIRM",
                     "orderId", args.orderId(),
@@ -108,7 +108,7 @@ public final class CancelOrderTool extends AbstractTool {
         }
 
         String argsHash = argumentsHasher.hash(normalizedArgsJson);
-        boolean accepted = confirmTokenStore.consume(ctx.runId(), args.confirmToken(), schema().name(), argsHash);
+        boolean accepted = confirmTokenStore.consume(ctx.runId(), ctx.userId(), args.confirmToken(), schema().name(), argsHash);
         if (!accepted) {
             return ToolTerminal.failed(running.call().toolCallId(), objectMapper.writeValueAsString(Map.of(
                     "type", "invalid_confirm_token",

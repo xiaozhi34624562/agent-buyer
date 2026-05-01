@@ -84,6 +84,48 @@ class CancelOrderToolIntegrationTest {
         }
     }
 
+    @Test
+    void repeatedDryRunInvalidatesPreviousConfirmTokenForSameAction() throws Exception {
+        String runId = Ids.newId("test_run");
+        String orderId = Ids.newId("O_TEST");
+        try {
+            insertPaidOrder(orderId);
+
+            ToolTerminal firstDryRun = tool.run(
+                    new ToolExecutionContext(runId, "demo-user", NoopSink.INSTANCE),
+                    started(runId, orderId, null),
+                    () -> false
+            );
+            String firstToken = objectMapper.readTree(firstDryRun.resultJson()).path("confirmToken").asText();
+
+            ToolTerminal secondDryRun = tool.run(
+                    new ToolExecutionContext(runId, "demo-user", NoopSink.INSTANCE),
+                    started(runId, orderId, null),
+                    () -> false
+            );
+            String secondToken = objectMapper.readTree(secondDryRun.resultJson()).path("confirmToken").asText();
+
+            assertThat(secondToken).isNotEqualTo(firstToken);
+
+            ToolTerminal oldTokenResult = tool.run(
+                    new ToolExecutionContext(runId, "demo-user", NoopSink.INSTANCE),
+                    started(runId, orderId, firstToken),
+                    () -> false
+            );
+            assertThat(oldTokenResult.status()).isEqualTo(ToolStatus.FAILED);
+            assertThat(oldTokenResult.errorJson()).contains("invalid_confirm_token");
+
+            ToolTerminal newTokenResult = tool.run(
+                    new ToolExecutionContext(runId, "demo-user", NoopSink.INSTANCE),
+                    started(runId, orderId, secondToken),
+                    () -> false
+            );
+            assertThat(newTokenResult.status()).isEqualTo(ToolStatus.SUCCEEDED);
+        } finally {
+            redisTemplate.delete("agent:{run:" + runId + "}:confirm-tokens");
+        }
+    }
+
     private StartedTool started(String runId, String orderId, String confirmToken) throws Exception {
         String argsJson = confirmToken == null
                 ? objectMapper.writeValueAsString(java.util.Map.of("orderId", orderId))

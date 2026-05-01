@@ -61,6 +61,19 @@ public class AppConfig {
     }
 
     @Bean
+    @Qualifier("eventExecutor")
+    ExecutorService eventExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setThreadNamePrefix("event-writer-");
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(1);
+        executor.setQueueCapacity(8192);
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
+        executor.initialize();
+        return executor.getThreadPoolExecutor();
+    }
+
+    @Bean
     @Qualifier("sseScheduler")
     ScheduledExecutorService sseScheduler() {
         return Executors.newScheduledThreadPool(2, runnable -> {

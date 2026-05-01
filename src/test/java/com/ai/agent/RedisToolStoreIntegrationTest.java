@@ -64,6 +64,7 @@ class RedisToolStoreIntegrationTest {
             assertThat(store.terminal(runId, safeD.toolCallId())).get()
                     .extracting(ToolTerminal::status)
                     .isEqualTo(ToolStatus.SUCCEEDED);
+            assertThat(store.activeRunIds()).doesNotContain(runId);
         } finally {
             redisTemplate.delete(List.of(
                     keys.meta(runId),
@@ -123,6 +124,47 @@ class RedisToolStoreIntegrationTest {
             assertThat(retry.call().toolCallId()).isEqualTo(safe.toolCallId());
             assertThat(retry.attempt()).isEqualTo(first.attempt() + 1);
             assertThat(retry.leaseToken()).isNotEqualTo(first.leaseToken());
+        } finally {
+            cleanup(runId);
+        }
+    }
+
+    @Test
+    void duplicateToolUseIdWrongLeaseAndAbortAreHandledByRedisStateMachine() {
+        String runId = Ids.newId("test_run");
+        try {
+            ToolCall first = call(runId, 1, "cancel_order", false, false);
+            ToolCall duplicate = new ToolCall(
+                    runId,
+                    Ids.newId("tc"),
+                    2,
+                    first.toolUseId(),
+                    "cancel_order",
+                    "cancel_order",
+                    "{}",
+                    false,
+                    false,
+                    false,
+                    null
+            );
+            ToolCall waiting = call(runId, 3, "query_order", true, true);
+
+            assertThat(store.ingestWaiting(runId, first)).isTrue();
+            assertThat(store.ingestWaiting(runId, duplicate)).isFalse();
+            assertThat(store.ingestWaiting(runId, waiting)).isTrue();
+
+            StartedTool running = store.schedule(runId).getFirst();
+            StartedTool wrongLease = new StartedTool(running.call(), running.attempt(), running.leaseToken() + "-wrong", running.leaseUntil(), running.workerId());
+            assertThat(store.complete(wrongLease, ToolTerminal.succeeded(running.call().toolCallId(), "{}"))).isFalse();
+
+            List<ToolTerminal> cancelled = store.cancelWaiting(runId, CancelReason.RUN_ABORTED);
+            assertThat(cancelled).extracting(ToolTerminal::toolCallId).contains(waiting.toolCallId());
+            assertThat(store.terminal(runId, waiting.toolCallId())).get()
+                    .extracting(ToolTerminal::status)
+                    .isEqualTo(ToolStatus.CANCELLED);
+
+            assertThat(store.complete(running, ToolTerminal.succeeded(running.call().toolCallId(), "{}"))).isTrue();
+            assertThat(store.activeRunIds()).doesNotContain(runId);
         } finally {
             cleanup(runId);
         }

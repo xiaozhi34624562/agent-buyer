@@ -6,6 +6,9 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
+import java.time.LocalDateTime;
+import java.util.List;
+
 public interface AgentRunMapper extends BaseMapper<AgentRunEntity> {
     @Update("""
             UPDATE agent_run
@@ -31,4 +34,30 @@ public interface AgentRunMapper extends BaseMapper<AgentRunEntity> {
 
     @Select("SELECT status FROM agent_run WHERE run_id = #{runId}")
     String findStatus(@Param("runId") String runId);
+
+    @Select("""
+            SELECT run_id, session_id, user_id, status, turn_no, started_at, updated_at, completed_at, last_error
+            FROM agent_run
+            WHERE status IN ('CREATED', 'RUNNING')
+              AND updated_at < #{cutoff}
+            ORDER BY updated_at ASC
+            LIMIT #{limit}
+            """)
+    List<AgentRunEntity> findStartupRepairCandidates(
+            @Param("cutoff") LocalDateTime cutoff,
+            @Param("limit") int limit
+    );
+
+    @Select("""
+            SELECT run_id, session_id, user_id, status, turn_no, started_at, updated_at, completed_at, last_error
+            FROM agent_run
+            WHERE status = 'WAITING_USER_CONFIRMATION'
+              AND updated_at < #{cutoff}
+            ORDER BY updated_at ASC
+            LIMIT #{limit}
+            """)
+    List<AgentRunEntity> findExpiredConfirmationRuns(
+            @Param("cutoff") LocalDateTime cutoff,
+            @Param("limit") int limit
+    );
 }

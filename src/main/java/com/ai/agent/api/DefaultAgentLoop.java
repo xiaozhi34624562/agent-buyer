@@ -12,6 +12,7 @@ import com.ai.agent.llm.PromptAssembler;
 import com.ai.agent.llm.ToolCallMessage;
 import com.ai.agent.llm.TranscriptPairValidator;
 import com.ai.agent.tool.CancelReason;
+import com.ai.agent.tool.ConfirmTokenStore;
 import com.ai.agent.tool.RunEventSinkRegistry;
 import com.ai.agent.tool.Tool;
 import com.ai.agent.tool.ToolCall;
@@ -53,6 +54,7 @@ public final class DefaultAgentLoop implements AgentLoop {
     private final TrajectoryStore trajectoryStore;
     private final RunEventSinkRegistry sinkRegistry;
     private final ContinuationLockService continuationLockService;
+    private final ConfirmTokenStore confirmTokenStore;
     private final ObjectMapper objectMapper;
 
     public DefaultAgentLoop(
@@ -67,6 +69,7 @@ public final class DefaultAgentLoop implements AgentLoop {
             TrajectoryStore trajectoryStore,
             RunEventSinkRegistry sinkRegistry,
             ContinuationLockService continuationLockService,
+            ConfirmTokenStore confirmTokenStore,
             ObjectMapper objectMapper
     ) {
         this.properties = properties;
@@ -80,6 +83,7 @@ public final class DefaultAgentLoop implements AgentLoop {
         this.trajectoryStore = trajectoryStore;
         this.sinkRegistry = sinkRegistry;
         this.continuationLockService = continuationLockService;
+        this.confirmTokenStore = confirmTokenStore;
         this.objectMapper = objectMapper;
     }
 
@@ -117,6 +121,14 @@ public final class DefaultAgentLoop implements AgentLoop {
                 throw new IllegalStateException("run is not waiting for continuation: " + status);
             }
             trajectoryStore.appendMessage(runId, LlmMessage.user(Ids.newId("msg"), message.content()));
+            if (isRejectingConfirmation(message.content())) {
+                confirmTokenStore.clearRun(runId);
+                String finalText = "已取消本次操作，订单未被更改。";
+                trajectoryStore.appendMessage(runId, LlmMessage.assistant(Ids.newId("msg"), finalText, List.of()));
+                trajectoryStore.updateRunStatus(runId, RunStatus.SUCCEEDED, null);
+                sink.onFinal(new FinalEvent(runId, finalText, RunStatus.SUCCEEDED, null));
+                return new AgentRunResult(runId, RunStatus.SUCCEEDED, finalText);
+            }
             trajectoryStore.updateRunStatus(runId, RunStatus.RUNNING, null);
             return runUntilStop(runId, userId, null, null, sink);
         } finally {
@@ -359,6 +371,23 @@ public final class DefaultAgentLoop implements AgentLoop {
             }
         }
         return null;
+    }
+
+    private boolean isRejectingConfirmation(String content) {
+        if (content == null) {
+            return false;
+        }
+        String normalized = content.toLowerCase();
+        return normalized.contains("不取消")
+                || normalized.contains("不用取消")
+                || normalized.contains("别取消")
+                || normalized.contains("算了")
+                || normalized.contains("不要了")
+                || normalized.contains("放弃")
+                || normalized.contains("cancel that")
+                || normalized.contains("do not cancel")
+                || normalized.contains("don't cancel")
+                || normalized.contains("no");
     }
 
     private String errorJson(String type, String message) {
