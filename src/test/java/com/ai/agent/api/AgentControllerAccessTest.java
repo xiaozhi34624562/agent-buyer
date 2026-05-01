@@ -923,6 +923,11 @@ class AgentControllerAccessTest {
         private java.util.function.Consumer<LlmChatRequest> beforeReturn;
 
         @Override
+        public String providerName() {
+            return "deepseek";
+        }
+
+        @Override
         public LlmStreamResult streamChat(LlmChatRequest request, LlmStreamListener listener) {
             streamChatCount++;
             if (beforeReturn != null) {

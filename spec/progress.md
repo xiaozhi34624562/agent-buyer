@@ -306,11 +306,27 @@ V2 必须按 `V2.0 -> V2.1 -> V2.2` 顺序推进，里程碑内部按 `task.md` 
 - 最终全量回归：`MYSQL_PASSWORD=*** mvn test`，92 tests，0 failures，0 errors，`BUILD SUCCESS`。
 - `java-alibaba-review` gate：未发现阻断 issue；遗留提醒是 V20-04 必须明确 `{}` providerOptions 的 fallback 默认语义。
 
-### V20-02 PENDING
+### V20-02 DONE
 
 - 写入范围：`LlmProviderAdapter` 接口拆分、`LlmProviderAdapterRegistry`、`DeepSeekProviderAdapter` 改造、`LlmAttemptService` 解耦。
 - 前置：`V20-02a`（要从 RunContext 读取 provider 选型）。
 - 关注点：现有 DeepSeek 测试不能回归；business code 不再 import 任何具体 provider 类。
+
+启动记录：
+
+- 启动时间：2026-05-01 22:27 CST。
+- owner：主 agent 负责验收与集成；worker 负责 provider registry/profile 边界改造；review agent 使用 `java-alibaba-review` gate。
+- TDD 目标：先补 registry 根据 provider name 选择 adapter、unknown provider fail closed、`LlmAttemptService` 从 `RunContext.primaryProvider` 读取 provider 的红测。
+
+集成记录：
+
+- worker 已完成 `LlmProviderAdapterRegistry`、`providerName()`、`DeepSeekCompatibilityProfile`、`LlmAttemptService` 按 providerName 选择 adapter。
+- 主 agent 集成时发现 `DeepSeekProviderAdapter` 如果继续按 `ProviderCompatibilityProfile` 接口注入，V20-03 增加 Qwen profile 后会出现 Spring 多 bean 歧义；已改为注入 `DeepSeekCompatibilityProfile`，把 provider 方言留在 adapter 边界内。
+- targeted：`mvn -Dtest=com.ai.agent.llm.LlmProviderAdapterRegistryTest,com.ai.agent.api.LlmAttemptServiceTest test`，5 tests，0 failures，`BUILD SUCCESS`。
+- full：`MYSQL_PASSWORD=*** mvn test`，97 tests，0 failures，0 errors，`BUILD SUCCESS`。
+- review gate：未发现阻断 issue；采纳“provider name 首尾空格应 fail closed”的建议，补红测后实现 `strip` 等值校验。
+- 最终 targeted：`mvn -Dtest=com.ai.agent.llm.LlmProviderAdapterRegistryTest,com.ai.agent.api.LlmAttemptServiceTest test`，6 tests，0 failures，`BUILD SUCCESS`。
+- 最终 full：`MYSQL_PASSWORD=*** mvn test`，98 tests，0 failures，0 errors，`BUILD SUCCESS`。
 
 ### V20-03 PENDING
 

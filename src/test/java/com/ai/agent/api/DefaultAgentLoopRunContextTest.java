@@ -488,6 +488,11 @@ class DefaultAgentLoopRunContextTest {
         }
 
         @Override
+        public String providerName() {
+            return "deepseek";
+        }
+
+        @Override
         public LlmStreamResult streamChat(LlmChatRequest request, LlmStreamListener listener) {
             requests.add(request);
             if (requests.size() == 1) {

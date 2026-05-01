@@ -4,6 +4,7 @@ import com.ai.agent.config.AgentProperties;
 import com.ai.agent.domain.RunStatus;
 import com.ai.agent.llm.LlmMessage;
 import com.ai.agent.llm.LlmProviderAdapter;
+import com.ai.agent.llm.LlmProviderAdapterRegistry;
 import com.ai.agent.llm.PromptAssembler;
 import com.ai.agent.llm.TranscriptPairValidator;
 import com.ai.agent.tool.ConfirmTokenStore;
@@ -107,7 +108,7 @@ public final class DefaultAgentLoop implements AgentLoop {
                 new AgentTurnOrchestrator(
                         properties,
                         transcriptPairValidator,
-                        new LlmAttemptService(providerAdapter, trajectoryStore, objectMapper),
+                        new LlmAttemptService(new LlmProviderAdapterRegistry(List.of(providerAdapter)), trajectoryStore, objectMapper),
                         new ToolCallCoordinator(
                                 properties,
                                 toolRegistry,

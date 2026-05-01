@@ -22,15 +22,16 @@ import java.util.Map;
 @Component
 public final class DeepSeekProviderAdapter implements LlmProviderAdapter {
     private static final int MAX_CONNECT_RETRIES = 2;
+    private static final String PROVIDER_NAME = "deepseek";
 
     private final AgentProperties properties;
-    private final ProviderCompatibilityProfile compatibilityProfile;
+    private final DeepSeekCompatibilityProfile compatibilityProfile;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
 
     public DeepSeekProviderAdapter(
             AgentProperties properties,
-            ProviderCompatibilityProfile compatibilityProfile,
+            DeepSeekCompatibilityProfile compatibilityProfile,
             ObjectMapper objectMapper
     ) {
         this.properties = properties;
@@ -39,6 +40,11 @@ public final class DeepSeekProviderAdapter implements LlmProviderAdapter {
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
+    }
+
+    @Override
+    public String providerName() {
+        return PROVIDER_NAME;
     }
 
     @Override

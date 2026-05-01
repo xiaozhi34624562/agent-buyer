@@ -4,6 +4,7 @@ import com.ai.agent.domain.FinishReason;
 import com.ai.agent.llm.LlmChatRequest;
 import com.ai.agent.llm.LlmMessage;
 import com.ai.agent.llm.LlmProviderAdapter;
+import com.ai.agent.llm.LlmProviderAdapterRegistry;
 import com.ai.agent.llm.LlmStreamResult;
 import com.ai.agent.llm.LlmUsage;
 import com.ai.agent.tool.Tool;
@@ -17,16 +18,16 @@ import java.util.Map;
 
 @Service
 public final class LlmAttemptService {
-    private final LlmProviderAdapter providerAdapter;
+    private final LlmProviderAdapterRegistry providerRegistry;
     private final TrajectoryStore trajectoryStore;
     private final ObjectMapper objectMapper;
 
     public LlmAttemptService(
-            LlmProviderAdapter providerAdapter,
+            LlmProviderAdapterRegistry providerRegistry,
             TrajectoryStore trajectoryStore,
             ObjectMapper objectMapper
     ) {
-        this.providerAdapter = providerAdapter;
+        this.providerRegistry = providerRegistry;
         this.trajectoryStore = trajectoryStore;
         this.objectMapper = objectMapper;
     }
@@ -35,12 +36,15 @@ public final class LlmAttemptService {
             String runId,
             int turnNo,
             String attemptId,
+            String providerName,
             String model,
             LlmParams params,
             List<LlmMessage> messages,
             List<Tool> allowedTools,
             AgentEventSink sink
     ) throws Exception {
+        LlmProviderAdapter providerAdapter = providerRegistry.resolve(providerName);
+        String actualProviderName = providerAdapter.providerName();
         try {
             LlmStreamResult result = providerAdapter.streamChat(
                     new LlmChatRequest(
@@ -54,10 +58,10 @@ public final class LlmAttemptService {
                     ),
                     delta -> sink.onTextDelta(new TextDeltaEvent(runId, attemptId, delta))
             );
-            writeSucceededAttempt(runId, turnNo, attemptId, model, result);
+            writeSucceededAttempt(runId, turnNo, attemptId, actualProviderName, model, result);
             return result;
         } catch (Exception e) {
-            writeFailedAttempt(runId, turnNo, attemptId, model, e);
+            writeFailedAttempt(runId, turnNo, attemptId, actualProviderName, model, e);
             throw e;
         }
     }
@@ -66,6 +70,7 @@ public final class LlmAttemptService {
             String runId,
             int turnNo,
             String attemptId,
+            String providerName,
             String model,
             LlmStreamResult result
     ) {
@@ -74,7 +79,7 @@ public final class LlmAttemptService {
                 attemptId,
                 runId,
                 turnNo,
-                "deepseek",
+                providerName,
                 model,
                 "SUCCEEDED",
                 result.finishReason(),
@@ -86,12 +91,12 @@ public final class LlmAttemptService {
         );
     }
 
-    private void writeFailedAttempt(String runId, int turnNo, String attemptId, String model, Exception e) {
+    private void writeFailedAttempt(String runId, int turnNo, String attemptId, String providerName, String model, Exception e) {
         trajectoryStore.writeLlmAttempt(
                 attemptId,
                 runId,
                 turnNo,
-                "deepseek",
+                providerName,
                 model,
                 "FAILED",
                 FinishReason.ERROR,
