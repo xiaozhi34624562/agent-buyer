@@ -1,13 +1,30 @@
+import { useState, useEffect } from 'react'
+import { ConsoleShell } from './components/console/ConsoleShell'
+import { Panel } from './components/ui/Panel'
+
 function App() {
+  const [userId, setUserId] = useState(() => localStorage.getItem('userId') || 'demo-user')
+  const [adminToken, setAdminToken] = useState(() => localStorage.getItem('adminToken') || '')
+
+  // Persist to localStorage
+  useEffect(() => {
+    localStorage.setItem('userId', userId)
+  }, [userId])
+
+  useEffect(() => {
+    localStorage.setItem('adminToken', adminToken)
+  }, [adminToken])
+
   return (
-    <div className="min-h-screen bg-gray-100">
-      <header className="bg-gray-800 text-white p-4">
-        <h1 className="text-xl font-bold">Agent Buyer Console</h1>
-      </header>
-      <main className="p-4">
-        <p className="text-gray-600">Console loading...</p>
-      </main>
-    </div>
+    <ConsoleShell
+      userId={userId}
+      adminToken={adminToken}
+      onUserIdChange={setUserId}
+      onAdminTokenChange={setAdminToken}
+      runsPanel={<Panel title="Runs">Run list loading...</Panel>}
+      timelinePanel={<Panel title="Timeline">Timeline loading...</Panel>}
+      chatPanel={<Panel title="Chat">Chat loading...</Panel>}
+    />
   )
 }
 
