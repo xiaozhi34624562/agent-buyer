@@ -1099,3 +1099,38 @@ V3M1-02 需新增以上配置项，并实现 `AdminAccessGuard` 校验。
 
 - 基线信息已梳理完成，无功能代码变更。
 - 下一步：V3M1-02，新增 `agent.admin.enabled/token` 配置与 `AdminAccessGuard` 校验。
+
+### V3M1-06 Review Gate 记录
+
+- 时间：2026-05-02 CST。
+- 状态：`DONE`。
+- 测试命令：`MYSQL_PASSWORD='Qaz1234!' mvn test`
+- 测试结果：278 tests, 0 failures, 0 errors, BUILD SUCCESS
+
+#### java-alibaba-review 结论
+
+- **无 P0/P1/P2 issue**
+- 审查范围：`web.admin.controller/service/dto`、`AgentProperties.Admin`、`application.yml`
+- 安全边界确认：
+  - SQL 参数绑定正确，无动态 sort/table 参数
+  - pageSize clamp 到 1-100
+  - confirmToken/abortToken 过滤不暴露
+  - active-runs set 只返回 `activeRun` boolean
+  - AdminAccessGuard 校验所有入口
+
+#### 修复记录
+
+- **P2 修复**：多 profile token 校验
+  - 问题：`activeProfile` 字符串匹配会误伤 `production,localish`
+  - 修复：使用 `Environment.getActiveProfiles()` 数组精确匹配
+  - 新增测试：`local,test` 允许空 token；`production,localish` 拒绝空 token
+
+- **P3 修复**：删除 sortBy 字段
+  - 问题：API 接受 sortBy 但完全忽略，契约不透明
+  - 修复：删除 `AdminRunListQuery.sortBy` 字段
+  - 测试改为验证固定 ORDER BY updated_at DESC
+
+#### 下一步
+
+- V3M1-GATE：手工 smoke 验证两个 endpoint
+- 然后开始 V3-M2 Frontend Shell
