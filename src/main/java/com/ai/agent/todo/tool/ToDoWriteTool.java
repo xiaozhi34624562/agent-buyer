@@ -9,7 +9,6 @@ import com.ai.agent.tool.core.ToolExecutionContext;
 import com.ai.agent.tool.core.ToolSchema;
 import com.ai.agent.tool.core.ToolUseContext;
 import com.ai.agent.tool.core.ToolValidation;
-import com.ai.agent.tool.model.CancelReason;
 import com.ai.agent.tool.model.StartedTool;
 import com.ai.agent.tool.model.ToolTerminal;
 import com.ai.agent.tool.model.ToolUse;
@@ -44,7 +43,6 @@ public final class ToDoWriteTool extends AbstractTool {
             """;
 
     private final TodoStore store;
-    private final ObjectMapper objectMapper;
     private final TrajectoryWriter trajectoryWriter;
 
     @Autowired
@@ -58,9 +56,8 @@ public final class ToDoWriteTool extends AbstractTool {
     }
 
     public ToDoWriteTool(PiiMasker piiMasker, TodoStore store, ObjectMapper objectMapper, TrajectoryWriter trajectoryWriter) {
-        super(piiMasker);
+        super(piiMasker, objectMapper);
         this.store = store;
-        this.objectMapper = objectMapper;
         this.trajectoryWriter = trajectoryWriter;
     }
 
@@ -83,17 +80,17 @@ public final class ToDoWriteTool extends AbstractTool {
         try {
             WriteArgs args = objectMapper.readValue(defaultJson(use.argsJson()), WriteArgs.class);
             if (args.stepId() == null || args.stepId().isBlank()) {
-                return ToolValidation.rejected(error("missing_step_id", "stepId is required"));
+                return ToolValidation.rejected(errorJson("missing_step_id", "stepId is required"));
             }
             if (args.status() == null || args.status().isBlank()) {
-                return ToolValidation.rejected(error("missing_status", "status is required"));
+                return ToolValidation.rejected(errorJson("missing_status", "status is required"));
             }
             parseStatus(args.status());
             return ToolValidation.accepted(objectMapper.writeValueAsString(args));
         } catch (IllegalArgumentException e) {
-            return ToolValidation.rejected(error("invalid_status", e.getMessage()));
+            return ToolValidation.rejected(errorJson("invalid_status", e.getMessage()));
         } catch (Exception e) {
-            return ToolValidation.rejected(error("invalid_args", e.getMessage()));
+            return ToolValidation.rejected(errorJson("invalid_args", e.getMessage()));
         }
     }
 
@@ -103,7 +100,7 @@ public final class ToDoWriteTool extends AbstractTool {
         TodoStatus status = parseStatus(args.status());
         ctx.sink().onToolProgress(new ToolProgressEvent(ctx.runId(), running.call().toolCallId(), "updating", "正在更新 ToDo 状态", 50));
         if (token.isCancellationRequested()) {
-            return cancelledBeforeSideEffect(running);
+            return cancelledBeforeSideEffect(running, "todo write cancelled before side effect");
         }
         TodoStep step = store.updateStep(ctx.runId(), args.stepId(), status, args.notes());
         writeEvent(ctx.runId(), "todo_updated", Map.of(
@@ -126,30 +123,6 @@ public final class ToDoWriteTool extends AbstractTool {
             return;
         }
         trajectoryWriter.writeAgentEvent(runId, eventType, toJson(payload));
-    }
-
-    private String defaultJson(String argsJson) {
-        return argsJson == null || argsJson.isBlank() ? "{}" : argsJson;
-    }
-
-    private String error(String type, String message) {
-        return toJson(Map.of("type", type, "message", message == null ? "" : message));
-    }
-
-    private String toJson(Object value) {
-        try {
-            return objectMapper.writeValueAsString(value);
-        } catch (JsonProcessingException e) {
-            return "{\"type\":\"serialization_error\"}";
-        }
-    }
-
-    private ToolTerminal cancelledBeforeSideEffect(StartedTool running) {
-        return ToolTerminal.syntheticCancelled(
-                running.call().toolCallId(),
-                CancelReason.RUN_ABORTED,
-                "{\"type\":\"run_aborted\",\"message\":\"todo write cancelled before side effect\"}"
-        );
     }
 
     private record WriteArgs(String stepId, String status, String notes) {

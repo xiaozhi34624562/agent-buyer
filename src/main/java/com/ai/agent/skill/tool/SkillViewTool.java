@@ -42,7 +42,6 @@ public final class SkillViewTool extends AbstractTool {
 
     private final SkillRegistry skillRegistry;
     private final SkillPathResolver skillPathResolver;
-    private final ObjectMapper objectMapper;
 
     public SkillViewTool(
             PiiMasker piiMasker,
@@ -50,10 +49,9 @@ public final class SkillViewTool extends AbstractTool {
             SkillPathResolver skillPathResolver,
             ObjectMapper objectMapper
     ) {
-        super(piiMasker);
+        super(piiMasker, objectMapper);
         this.skillRegistry = skillRegistry;
         this.skillPathResolver = skillPathResolver;
-        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -75,11 +73,11 @@ public final class SkillViewTool extends AbstractTool {
         try {
             SkillViewArgs args = objectMapper.readValue(defaultJson(use.argsJson()), SkillViewArgs.class);
             if (args.skillName() == null || args.skillName().isBlank()) {
-                return ToolValidation.rejected(error("missing_skill_name", "skillName is required"));
+                return ToolValidation.rejected(errorJson("missing_skill_name", "skillName is required"));
             }
             return ToolValidation.accepted(objectMapper.writeValueAsString(args));
         } catch (Exception e) {
-            return ToolValidation.rejected(error("invalid_args", e.getMessage()));
+            return ToolValidation.rejected(errorJson("invalid_args", e.getMessage()));
         }
     }
 
@@ -94,7 +92,7 @@ public final class SkillViewTool extends AbstractTool {
         if (!skillRegistry.contains(args.skillName())) {
             return ToolTerminal.failed(
                     running.call().toolCallId(),
-                    error("skill_not_found", "skill is not available to the current user")
+                    errorJson("skill_not_found", "skill is not available to the current user")
             );
         }
         try {
@@ -108,22 +106,7 @@ public final class SkillViewTool extends AbstractTool {
                     "content", content
             )));
         } catch (SkillPathException e) {
-            return ToolTerminal.failed(running.call().toolCallId(), error(e.code().name(), e.getMessage()));
-        }
-    }
-
-    private String defaultJson(String argsJson) {
-        return argsJson == null || argsJson.isBlank() ? "{}" : argsJson;
-    }
-
-    private String error(String type, String message) {
-        try {
-            return objectMapper.writeValueAsString(Map.of(
-                    "type", type,
-                    "message", message == null ? "" : message
-            ));
-        } catch (JsonProcessingException e) {
-            return "{\"type\":\"skill_error\"}";
+            return ToolTerminal.failed(running.call().toolCallId(), errorJson(e.code().name(), e.getMessage()));
         }
     }
 

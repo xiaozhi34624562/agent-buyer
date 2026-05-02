@@ -1,15 +1,21 @@
 package com.ai.agent.tool.core;
 
+import com.ai.agent.tool.model.CancelReason;
 import com.ai.agent.tool.model.StartedTool;
 import com.ai.agent.tool.model.ToolTerminal;
 import com.ai.agent.tool.model.ToolUse;
 import com.ai.agent.tool.security.PiiMasker;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Map;
 
 public abstract class AbstractTool implements Tool {
     private final PiiMasker piiMasker;
+    protected final ObjectMapper objectMapper;
 
-    protected AbstractTool(PiiMasker piiMasker) {
+    protected AbstractTool(PiiMasker piiMasker, ObjectMapper objectMapper) {
         this.piiMasker = piiMasker;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -52,5 +58,52 @@ public abstract class AbstractTool implements Tool {
                 terminal.cancelReason(),
                 terminal.synthetic()
         );
+    }
+
+    /**
+     * Returns empty JSON object if argsJson is null or blank.
+     */
+    protected String defaultJson(String argsJson) {
+        return argsJson == null || argsJson.isBlank() ? "{}" : argsJson;
+    }
+
+    /**
+     * Creates a terminal for cancellation before side effect was applied.
+     */
+    protected ToolTerminal cancelledBeforeSideEffect(StartedTool running) {
+        return ToolTerminal.syntheticCancelled(
+                running.call().toolCallId(),
+                CancelReason.RUN_ABORTED,
+                "{\"type\":\"run_aborted\",\"message\":\"tool cancelled before side effect\"}"
+        );
+    }
+
+    /**
+     * Creates a terminal for cancellation before side effect with custom message.
+     */
+    protected ToolTerminal cancelledBeforeSideEffect(StartedTool running, String message) {
+        return ToolTerminal.syntheticCancelled(
+                running.call().toolCallId(),
+                CancelReason.RUN_ABORTED,
+                errorJson("run_aborted", message)
+        );
+    }
+
+    /**
+     * Creates an error JSON string.
+     */
+    protected String errorJson(String type, String message) {
+        return toJson(Map.of("type", type, "message", message == null ? "" : message));
+    }
+
+    /**
+     * Serializes a value to JSON string.
+     */
+    protected String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException e) {
+            throw new IllegalArgumentException("failed to serialize json", e);
+        }
     }
 }

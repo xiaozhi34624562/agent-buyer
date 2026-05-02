@@ -56,7 +56,6 @@ public final class AgentTool extends AbstractTool {
             }
             """;
 
-    private final ObjectMapper objectMapper;
     private final ObjectProvider<SubAgentRunner> runnerProvider;
     private final AgentProperties properties;
 
@@ -79,8 +78,7 @@ public final class AgentTool extends AbstractTool {
             ObjectProvider<SubAgentRunner> runnerProvider,
             AgentProperties properties
     ) {
-        super(piiMasker);
-        this.objectMapper = objectMapper;
+        super(piiMasker, objectMapper);
         this.runnerProvider = runnerProvider;
         this.properties = properties == null ? new AgentProperties() : properties;
     }
@@ -104,17 +102,17 @@ public final class AgentTool extends AbstractTool {
         try {
             AgentToolArgs args = objectMapper.readValue(defaultJson(use.argsJson()), AgentToolArgs.class);
             if (args.agentType() == null || args.agentType().isBlank()) {
-                return ToolValidation.rejected(error("missing_agent_type", "agentType is required"));
+                return ToolValidation.rejected(errorJson("missing_agent_type", "agentType is required"));
             }
             if (!"explore".equals(args.agentType())) {
-                return ToolValidation.rejected(error("unsupported_agent_type", "only explore agent is supported"));
+                return ToolValidation.rejected(errorJson("unsupported_agent_type", "only explore agent is supported"));
             }
             if (args.task() == null || args.task().isBlank()) {
-                return ToolValidation.rejected(error("missing_task", "task is required"));
+                return ToolValidation.rejected(errorJson("missing_task", "task is required"));
             }
             return ToolValidation.accepted(objectMapper.writeValueAsString(args));
         } catch (Exception e) {
-            return ToolValidation.rejected(error("invalid_args", e.getMessage()));
+            return ToolValidation.rejected(errorJson("invalid_args", e.getMessage()));
         }
     }
 
@@ -129,7 +127,7 @@ public final class AgentTool extends AbstractTool {
         if (runner == null) {
             return ToolTerminal.failed(
                     running.call().toolCallId(),
-                    error("subagent_not_ready", "SubAgent runner is not wired until V21-11")
+                    errorJson("subagent_not_ready", "SubAgent runner is not wired until V21-11")
             );
         }
         AgentToolArgs args = objectMapper.readValue(normalizedArgsJson, AgentToolArgs.class);
@@ -181,21 +179,6 @@ public final class AgentTool extends AbstractTool {
             return "SUBAGENT_CANCELLED";
         }
         return "SUBAGENT_FAILED";
-    }
-
-    private String defaultJson(String argsJson) {
-        return argsJson == null || argsJson.isBlank() ? "{}" : argsJson;
-    }
-
-    private String error(String type, String message) {
-        try {
-            return objectMapper.writeValueAsString(Map.of(
-                    "type", type,
-                    "message", message == null ? "" : message
-            ));
-        } catch (JsonProcessingException e) {
-            return "{\"type\":\"agent_tool_error\"}";
-        }
     }
 
     private record AgentToolArgs(String agentType, String task, String systemPrompt) {

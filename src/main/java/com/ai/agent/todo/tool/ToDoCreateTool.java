@@ -9,7 +9,6 @@ import com.ai.agent.tool.core.ToolExecutionContext;
 import com.ai.agent.tool.core.ToolSchema;
 import com.ai.agent.tool.core.ToolUseContext;
 import com.ai.agent.tool.core.ToolValidation;
-import com.ai.agent.tool.model.CancelReason;
 import com.ai.agent.tool.model.StartedTool;
 import com.ai.agent.tool.model.ToolTerminal;
 import com.ai.agent.tool.model.ToolUse;
@@ -51,7 +50,6 @@ public final class ToDoCreateTool extends AbstractTool {
             """;
 
     private final TodoStore store;
-    private final ObjectMapper objectMapper;
     private final TrajectoryWriter trajectoryWriter;
 
     @Autowired
@@ -65,9 +63,8 @@ public final class ToDoCreateTool extends AbstractTool {
     }
 
     public ToDoCreateTool(PiiMasker piiMasker, TodoStore store, ObjectMapper objectMapper, TrajectoryWriter trajectoryWriter) {
-        super(piiMasker);
+        super(piiMasker, objectMapper);
         this.store = store;
-        this.objectMapper = objectMapper;
         this.trajectoryWriter = trajectoryWriter;
     }
 
@@ -90,16 +87,16 @@ public final class ToDoCreateTool extends AbstractTool {
         try {
             CreateArgs args = objectMapper.readValue(defaultJson(use.argsJson()), CreateArgs.class);
             if (args.items() == null || args.items().isEmpty()) {
-                return ToolValidation.rejected(error("missing_items", "items is required"));
+                return ToolValidation.rejected(errorJson("missing_items", "items is required"));
             }
             for (TodoDraft item : args.items()) {
                 if (item == null || item.title() == null || item.title().isBlank()) {
-                    return ToolValidation.rejected(error("missing_title", "each item title is required"));
+                    return ToolValidation.rejected(errorJson("missing_title", "each item title is required"));
                 }
             }
             return ToolValidation.accepted(objectMapper.writeValueAsString(args));
         } catch (Exception e) {
-            return ToolValidation.rejected(error("invalid_args", e.getMessage()));
+            return ToolValidation.rejected(errorJson("invalid_args", e.getMessage()));
         }
     }
 
@@ -108,7 +105,7 @@ public final class ToDoCreateTool extends AbstractTool {
         CreateArgs args = objectMapper.readValue(normalizedArgsJson, CreateArgs.class);
         ctx.sink().onToolProgress(new ToolProgressEvent(ctx.runId(), running.call().toolCallId(), "planning", "正在创建 ToDo 计划", 40));
         if (token.isCancellationRequested()) {
-            return cancelledBeforeSideEffect(running);
+            return cancelledBeforeSideEffect(running, "todo create cancelled before side effect");
         }
         List<TodoStep> steps = store.replacePlan(ctx.runId(), args.items());
         writeEvent(ctx.runId(), "todo_created", Map.of(
@@ -127,30 +124,6 @@ public final class ToDoCreateTool extends AbstractTool {
             return;
         }
         trajectoryWriter.writeAgentEvent(runId, eventType, toJson(payload));
-    }
-
-    private String defaultJson(String argsJson) {
-        return argsJson == null || argsJson.isBlank() ? "{}" : argsJson;
-    }
-
-    private String error(String type, String message) {
-        return toJson(Map.of("type", type, "message", message == null ? "" : message));
-    }
-
-    private String toJson(Object value) {
-        try {
-            return objectMapper.writeValueAsString(value);
-        } catch (JsonProcessingException e) {
-            return "{\"type\":\"serialization_error\"}";
-        }
-    }
-
-    private ToolTerminal cancelledBeforeSideEffect(StartedTool running) {
-        return ToolTerminal.syntheticCancelled(
-                running.call().toolCallId(),
-                CancelReason.RUN_ABORTED,
-                "{\"type\":\"run_aborted\",\"message\":\"todo create cancelled before side effect\"}"
-        );
     }
 
     private record CreateArgs(List<TodoDraft> items) {

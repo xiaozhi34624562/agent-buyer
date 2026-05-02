@@ -25,12 +25,10 @@ public final class SkillListTool extends AbstractTool {
             """;
 
     private final SkillRegistry skillRegistry;
-    private final ObjectMapper objectMapper;
 
     public SkillListTool(PiiMasker piiMasker, SkillRegistry skillRegistry, ObjectMapper objectMapper) {
-        super(piiMasker);
+        super(piiMasker, objectMapper);
         this.skillRegistry = skillRegistry;
-        this.objectMapper = objectMapper;
     }
 
     @Override

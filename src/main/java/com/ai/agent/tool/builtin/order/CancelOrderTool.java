@@ -48,7 +48,6 @@ public final class CancelOrderTool extends AbstractTool {
     private final OrderClient orderClient;
     private final ConfirmTokenStore confirmTokenStore;
     private final ToolArgumentsHasher argumentsHasher;
-    private final ObjectMapper objectMapper;
 
     public CancelOrderTool(
             PiiMasker piiMasker,
@@ -57,11 +56,10 @@ public final class CancelOrderTool extends AbstractTool {
             ToolArgumentsHasher argumentsHasher,
             ObjectMapper objectMapper
     ) {
-        super(piiMasker);
+        super(piiMasker, objectMapper);
         this.orderClient = orderClient;
         this.confirmTokenStore = confirmTokenStore;
         this.argumentsHasher = argumentsHasher;
-        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -93,7 +91,7 @@ public final class CancelOrderTool extends AbstractTool {
             }
             return ToolValidation.accepted(objectMapper.writeValueAsString(args));
         } catch (Exception e) {
-            return ToolValidation.rejected(error("invalid_args", e.getMessage()));
+            return ToolValidation.rejected(errorJson("invalid_args", e.getMessage()));
         }
     }
 
@@ -153,26 +151,6 @@ public final class CancelOrderTool extends AbstractTool {
                 "status", result.status().name(),
                 "summary", result.summary()
         )));
-    }
-
-    private String defaultJson(String argsJson) {
-        return argsJson == null || argsJson.isBlank() ? "{}" : argsJson;
-    }
-
-    private String error(String type, String message) {
-        try {
-            return objectMapper.writeValueAsString(Map.of("type", type, "message", message == null ? "" : message));
-        } catch (JsonProcessingException e) {
-            return "{\"type\":\"invalid_args\"}";
-        }
-    }
-
-    private ToolTerminal cancelledBeforeSideEffect(StartedTool running) {
-        return ToolTerminal.syntheticCancelled(
-                running.call().toolCallId(),
-                CancelReason.RUN_ABORTED,
-                "{\"type\":\"run_aborted\",\"message\":\"tool cancelled before side effect\"}"
-        );
     }
 
     private record CancelArgs(String orderId, String confirmToken) {

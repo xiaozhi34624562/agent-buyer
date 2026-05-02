@@ -45,12 +45,10 @@ public final class QueryOrderTool extends AbstractTool {
             """;
 
     private final OrderClient orderClient;
-    private final ObjectMapper objectMapper;
 
     public QueryOrderTool(PiiMasker piiMasker, OrderClient orderClient, ObjectMapper objectMapper) {
-        super(piiMasker);
+        super(piiMasker, objectMapper);
         this.orderClient = orderClient;
-        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -76,7 +74,7 @@ public final class QueryOrderTool extends AbstractTool {
             }
             return ToolValidation.accepted(objectMapper.writeValueAsString(args));
         } catch (Exception e) {
-            return ToolValidation.rejected(error("invalid_args", e.getMessage()));
+            return ToolValidation.rejected(errorJson("invalid_args", e.getMessage()));
         }
     }
 
@@ -102,18 +100,6 @@ public final class QueryOrderTool extends AbstractTool {
         ));
         ctx.sink().onToolProgress(new com.ai.agent.web.sse.ToolProgressEvent(ctx.runId(), running.call().toolCallId(), "done", "订单查询完成", 100));
         return ToolTerminal.succeeded(running.call().toolCallId(), result);
-    }
-
-    private String defaultJson(String argsJson) {
-        return argsJson == null || argsJson.isBlank() ? "{}" : argsJson;
-    }
-
-    private String error(String type, String message) {
-        try {
-            return objectMapper.writeValueAsString(Map.of("type", type, "message", message == null ? "" : message));
-        } catch (JsonProcessingException e) {
-            return "{\"type\":\"invalid_args\"}";
-        }
     }
 
     private record QueryArgs(String dateRange, String status, String keyword, String orderId) {
