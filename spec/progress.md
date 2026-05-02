@@ -1163,4 +1163,91 @@ V3M1-02 需新增以上配置项，并实现 `AdminAccessGuard` 校验。
 #### 结论
 
 - V3-M1 Backend Console API 完成
+
+## 2026-05-02 V3 Frontend Console 完成
+
+### V3M2 Frontend Shell 完成
+
+- **状态**：`DONE`
+- **实现内容**：
+  - ConsoleShell 组件：Header + 三栏布局
+  - Settings Modal：userId、adminToken 配置
+  - localStorage 持久化：userId、adminToken、debug 状态
+  - 响应式布局：Desktop 三栏并排，Mobile 底部 Tabs 切换
+  - Header 颜色：用户反馈后改为蓝色 `bg-blue-600`
+
+### V3M3 Run List + Timeline + Runtime Debug 完成
+
+- **状态**：`DONE`
+- **实现内容**：
+  - RunListPanel：分页、状态过滤、userId 过滤、run 选择
+  - TimelinePanel：MESSAGE、LLM_ATTEMPT、TOOL_CALL、TOOL_PROGRESS、TOOL_RESULT、EVENT、COMPACTION
+  - DebugDrawer：Runtime State 可视化，敏感字段脱敏 `[REDACTED]`
+  - Hooks：useRunList、useRunDetail、useRuntimeState
+  - API：createAdminApi、createAgentApi
+
+### V3M4 Chat + SSE 完成
+
+- **状态**：`DONE`
+- **实现内容**：
+  - ChatPanel：消息流、ToolCard 显示、HITL 确认按钮
+  - useChatStream：text_delta、tool_use、tool_progress、tool_result、final、error 处理
+  - useChatMessages：sendMessage、sendConfirmation
+  - RunControls：New Chat、Refresh、Interrupt、Abort
+  - SSE streaming：POST + ReadableStream（非 EventSource）
+  - confirmToken 脱敏：事件处理前删除，不存入 state
+
+### V3M5 Hardening + Demo 完成
+
+- **状态**：`DONE`
+- **实现内容**：
+  - V3M5-01：启动脚本 `scripts/start-console-dev.sh`
+  - V3M5-02：README 中文文档
+  - V3M5-03：测试 fixtures（RunSummary、TrajectoryNode、RuntimeState、SseEvent）
+  - V3M5-04：App.integration.test.tsx（完整 UI 流测试）
+  - V3M5-05：Playwright browser smoke（Desktop 1440x900、Mobile 390x844）
+  - V3M5-06：ESLint 修复、最终验证
+
+### V3 最终验证结果
+
+- **前端测试**：164 tests pass（vitest）
+- **前端构建**：npm run build 成功
+- **前端 Lint**：ESLint 0 errors, 0 warnings
+- **后端测试**：278 tests pass（mvn test）
+- **代码审查**：
+  - front-alibaba-review：无 P0/P1/P2 阻断 issue
+  - java-alibaba-review：已通过（V3M1-GATE）
+
+### V3-GATE 验收清单
+
+- V3M1-GATE：DONE（Backend Console API）
+- V3M2-GATE：DONE（Frontend Shell）
+- V3M3-GATE：DONE（Run List + Timeline + Debug）
+- V3M4-GATE：DONE（Chat + SSE）
+- V3M5-GATE：DONE（Hardening + Demo）
+
+### Console 功能清单验证
+
+- Run List：分页浏览、状态过滤、userId 过滤 ✓
+- Timeline：完整 trajectory 节点展示 ✓
+- Runtime State：Debug Drawer 显示 Redis state ✓
+- Chat：创建新 run、发送消息、SSE streaming ✓
+- HITL：WAITING_USER_CONFIRMATION 确认/放弃按钮 ✓
+- PAUSED：user_input placeholder 提示 ✓
+- Run Controls：New Chat、Refresh、Interrupt、Abort ✓
+- 安全边界：confirmToken、adminToken、API key 脱敏 ✓
+
+### 安全边界确认
+
+Console 不做：
+- 不做通用 MySQL table browser ✓
+- 不做任意 Redis key browser ✓
+- 不新增 `/api/admin/chat` ✓
+- 不实现生产级多租户 admin RBAC ✓
+- 不暴露原始 confirmToken、provider key、admin token ✓
+
+### 下一步
+
+- E2E 真实 LLM 测试（启动后端 + 前端，使用真实 DeepSeek/Qwen API）
+- V3 完成，准备 push
 - 开始 V3-M2 Frontend Shell
