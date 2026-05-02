@@ -4,6 +4,11 @@
 
 set -e
 
+# Resolve script directory to make path-independent
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ADMIN_WEB="$PROJECT_ROOT/admin-web"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -11,10 +16,18 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 echo "=== Agent Buyer Console Dev Startup ==="
+echo "Project root: $PROJECT_ROOT"
+echo "Admin-web: $ADMIN_WEB"
+
+# Get MySQL password from environment or prompt
+if [ -z "$MYSQL_PASSWORD" ]; then
+    echo "${YELLOW}MYSQL_PASSWORD not set. Using default for local dev.${NC}"
+    MYSQL_PASSWORD='Qaz1234!'
+fi
 
 # Check MySQL connectivity
 echo "Checking MySQL..."
-if mysql -h127.0.0.1 -P3307 -uroot -p'Qaz1234!' -e "SELECT 1" > /dev/null 2>&1; then
+if mysql -h127.0.0.1 -P3307 -uroot -p"$MYSQL_PASSWORD" -e "SELECT 1" > /dev/null 2>&1; then
     echo "${GREEN}MySQL OK${NC}"
 else
     echo "${RED}MySQL NOT OK - please start: docker start agent-buyer-mysql8${NC}"
@@ -36,9 +49,9 @@ if lsof -i :8080 > /dev/null 2>&1; then
     echo "${YELLOW}Backend already running on 8080, skipping startup${NC}"
 else
     echo "Starting backend on 8080..."
-    cd ../
-    MYSQL_PASSWORD='Qaz1234!' SERVER_PORT=8080 mvn spring-boot:run -q &
-    cd admin-web
+    cd "$PROJECT_ROOT"
+    MYSQL_PASSWORD="$MYSQL_PASSWORD" SERVER_PORT=8080 mvn spring-boot:run -q &
+    cd "$ADMIN_WEB"
     # Wait for backend to start
     echo "Waiting for backend..."
     for i in {1..30}; do
@@ -52,6 +65,7 @@ fi
 
 # Start frontend
 echo "Starting frontend..."
+cd "$ADMIN_WEB"
 npm run dev
 
 echo "${GREEN}Console ready!${NC}"

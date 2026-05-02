@@ -1,18 +1,29 @@
-import type { SseEvent } from '../types'
+import { readSseStream } from './sseParser'
 
 const API_BASE = '/api/agent'
 
+export interface UserMessage {
+  role: 'user' | 'assistant' | 'system'
+  content: string
+}
+
+export interface LlmParams {
+  model?: string
+  temperature?: number
+  maxTokens?: number
+  maxTurns?: number
+}
+
 export interface CreateRunRequest {
   userId: string
-  prompt: string
-  model?: string
-  maxTurns?: number
+  messages: UserMessage[]
   allowedToolNames?: string[]
+  llmParams?: LlmParams
 }
 
 export interface ContinueRunRequest {
   userId: string
-  content: string
+  message: UserMessage
 }
 
 export interface AgentApiConfig {
@@ -30,11 +41,14 @@ export function createAgentApi(config: AgentApiConfig) {
       method: 'POST',
       headers: headers(),
       body: JSON.stringify({
-        userId: config.userId,
-        prompt: request.prompt,
-        model: request.model ?? 'deepseek-reasoner',
-        maxTurns: request.maxTurns ?? 10,
+        messages: request.messages,
         allowedToolNames: request.allowedToolNames ?? ['query_order', 'cancel_order', 'skill_list', 'skill_view', 'agent_tool', 'todo_create', 'todo_write'],
+        llmParams: {
+          model: request.llmParams?.model ?? 'deepseek-reasoner',
+          temperature: request.llmParams?.temperature ?? 0.2,
+          maxTokens: request.llmParams?.maxTokens ?? 4096,
+          maxTurns: request.llmParams?.maxTurns ?? 10,
+        },
       }),
     })
 
@@ -46,11 +60,11 @@ export function createAgentApi(config: AgentApiConfig) {
     return response.url
   }
 
-  async function continueRun(runId: string, content: string): Promise<string> {
+  async function continueRun(runId: string, message: UserMessage): Promise<string> {
     const response = await fetch(`${API_BASE}/runs/${runId}/messages`, {
       method: 'POST',
       headers: headers(),
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ message }),
     })
 
     if (!response.ok) {
@@ -95,60 +109,13 @@ export function createAgentApi(config: AgentApiConfig) {
     }
   }
 
-  function parseSseStream(response: Response): AsyncIterable<SseEvent> {
-    const reader = response.body?.getReader()
-    if (!reader) {
-      throw new Error('No response body')
-    }
-    const safeReader = reader
-
-    const decoder = new TextDecoder()
-    let buffer = ''
-
-    async function* generate(): AsyncIterable<SseEvent> {
-      while (true) {
-        const { done, value } = await safeReader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-
-        // Process complete events in buffer
-        const lines = buffer.split('\n')
-        buffer = lines.pop() ?? ''
-
-        for (const line of lines) {
-          if (line.startsWith('data:')) {
-            const data = line.slice(5).trim()
-            if (data === '') continue
-
-            try {
-              const event = JSON.parse(data) as SseEvent
-              // Normalize toolName field (handle legacy 'name' field)
-              if (event.type === 'tool_use' && 'name' in event && !event.toolName) {
-                event.toolName = (event as Record<string, unknown>).name as string
-              }
-              yield event
-            } catch {
-              // Invalid JSON - skip (ping or malformed)
-              if (data === 'ping') {
-                yield { type: 'ping' }
-              }
-            }
-          }
-        }
-      }
-    }
-
-    return generate()
-  }
-
   return {
     createRun,
     continueRun,
     getTrajectory,
     abortRun,
     interruptRun,
-    parseSseStream,
+    readSseStream,
     headers,
   }
 }

@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import type { SseEvent, ToolCard } from '../types'
+import { readSseStream } from '../api/sseParser'
 
 export interface ChatMessage {
   role: 'user' | 'assistant'
@@ -55,38 +56,9 @@ export function useChatMessages(options: UseChatMessagesOptions): UseChatMessage
         throw new Error(`sendMessage failed: ${response.status}`)
       }
 
-      // Process SSE stream
-      const reader = response.body?.getReader()
-      if (!reader) return
-
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() ?? ''
-
-        for (const line of lines) {
-          if (line.startsWith('data:')) {
-            const data = line.slice(5).trim()
-            if (data === '' || data === 'ping') continue
-
-            try {
-              const event = JSON.parse(data) as SseEvent
-              // Normalize toolName
-              if (event.type === 'tool_use' && 'name' in event && !event.toolName) {
-                event.toolName = (event as Record<string, unknown>).name as string
-              }
-              onEvent?.(event)
-            } catch {
-              // Skip invalid JSON
-            }
-          }
-        }
+      // Use unified SSE stream reader
+      for await (const event of readSseStream(response)) {
+        onEvent?.(event)
       }
     } catch (error) {
       onEvent?.({ type: 'error', error: (error as Error).message })

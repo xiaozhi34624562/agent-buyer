@@ -105,3 +105,55 @@ export function parseSseChunks(chunks: string[]): SseParseResult {
 
   return { events, errors }
 }
+
+/**
+ * Read SSE events from a fetch Response stream.
+ * Unified reader for all SSE streams - handles split chunks, ping, and malformed JSON.
+ * Normalizes toolName field (handles legacy 'name' field).
+ */
+export async function* readSseStream(response: Response): AsyncIterable<SseEvent> {
+  const reader = response.body?.getReader()
+  if (!reader) {
+    throw new Error('No response body')
+  }
+
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+
+      for (const line of lines) {
+        if (line.startsWith('data:')) {
+          const data = line.slice(5).trim()
+          if (data === '') continue
+
+          const event = parseSseData(data)
+          if (event) {
+            yield event
+          }
+        }
+      }
+    }
+
+    // Process remaining buffer if any
+    if (buffer.startsWith('data:')) {
+      const data = buffer.slice(5).trim()
+      if (data !== '') {
+        const event = parseSseData(data)
+        if (event) {
+          yield event
+        }
+      }
+    }
+  } finally {
+    // Ensure reader is released
+    reader.releaseLock()
+  }
+}

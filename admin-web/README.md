@@ -16,9 +16,9 @@ Agent Buyer Console 是一个 React 前端应用，用于观察和操作 Agent B
 
 ```bash
 cd ../
-export MYSQL_PASSWORD='Qaz1234!'
+export MYSQL_PASSWORD='<local mysql password>'
 export DEEPSEEK_API_KEY='<your deepseek api key>'
-export DASHSCOPE_API_KEY='<your qwen api key>'
+export QWEN_API_KEY='<your qwen api key>'
 mvn spring-boot:run
 ```
 

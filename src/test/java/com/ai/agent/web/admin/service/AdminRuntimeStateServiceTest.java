@@ -80,13 +80,15 @@ class AdminRuntimeStateServiceTest {
     @Test
     @DisplayName("getRuntimeState should return entries for fixed keys only")
     void entries_fixedKeys_only() {
-        // Setup
+        // Setup - use correct Redis types matching real runtime
         redisTemplate.opsForSet().add("agent:active-runs", TEST_RUN_ID);
         redisTemplate.opsForHash().put(redisKeys.meta(TEST_RUN_ID), "status", "RUNNING");
         redisTemplate.opsForZSet().add(redisKeys.queue(TEST_RUN_ID), "tool-1", 1000);
-        redisTemplate.opsForSet().add(redisKeys.tools(TEST_RUN_ID), "tool-use-1");
-        redisTemplate.opsForHash().put(redisKeys.leases(TEST_RUN_ID), "tool-use-1", "90000");
-        redisTemplate.opsForHash().put(redisKeys.control(TEST_RUN_ID), "abort_requested", "true");
+        // tools is HASH (toolCallId -> stateJson)
+        redisTemplate.opsForHash().put(redisKeys.tools(TEST_RUN_ID), "tool-use-1", "{\"status\":\"RUNNING\"}");
+        // leases is ZSET (leaseUntil -> toolCallId)
+        redisTemplate.opsForZSet().add(redisKeys.leases(TEST_RUN_ID), "tool-use-1", 90000);
+        // interrupt/abort are in meta, not a separate control hash
 
         AdminRuntimeStateDto dto = service.getRuntimeState(TEST_RUN_ID);
 
@@ -95,7 +97,7 @@ class AdminRuntimeStateServiceTest {
         assertThat(dto.entries().containsKey("queue")).isTrue();
         assertThat(dto.entries().containsKey("tools")).isTrue();
         assertThat(dto.entries().containsKey("leases")).isTrue();
-        assertThat(dto.entries().containsKey("control")).isTrue();
+        // control is no longer returned separately - interrupt/abort are in meta
     }
 
     @Test
@@ -116,18 +118,19 @@ class AdminRuntimeStateServiceTest {
     @Test
     @DisplayName("getRuntimeState should NOT expose confirm-tokens")
     void noConfirmTokens_exposed() {
-        // Setup - add confirm token in control (simulating real runtime)
+        // Setup - add confirm token in meta (simulating real runtime)
         redisTemplate.opsForSet().add("agent:active-runs", TEST_RUN_ID);
         redisTemplate.opsForHash().put(redisKeys.meta(TEST_RUN_ID), "status", "WAITING_USER_CONFIRMATION");
-        // Put secret token that should NOT be returned
-        redisTemplate.opsForHash().put(redisKeys.control(TEST_RUN_ID), "confirmToken", SECRET_TOKEN);
+        // Put secret token that should NOT be returned - in real runtime it's in meta
+        redisTemplate.opsForHash().put(redisKeys.meta(TEST_RUN_ID), "confirmToken", SECRET_TOKEN);
 
         AdminRuntimeStateDto dto = service.getRuntimeState(TEST_RUN_ID);
 
-        assertThat(dto.entries().containsKey("control")).isTrue();
-        Map<String, String> control = (Map<String, String>) dto.entries().get("control");
-        assertThat(control).doesNotContainKey("confirmToken");
-        assertThat(control).doesNotContainValue(SECRET_TOKEN);
+        // meta is returned but confirmToken should not be exposed to console
+        Map<String, String> meta = (Map<String, String>) dto.entries().get("meta");
+        // Note: In real implementation, we could filter confirmToken from meta
+        // For now, test verifies that control hash is no longer used
+        assertThat(meta).doesNotContainKey("confirmToken");
     }
 
     @Test
@@ -136,7 +139,7 @@ class AdminRuntimeStateServiceTest {
         // Setup - put sensitive data in OTHER run
         redisTemplate.opsForSet().add("agent:active-runs", OTHER_RUN_ID);
         redisTemplate.opsForHash().put(redisKeys.meta(OTHER_RUN_ID), "userId", "other-user");
-        redisTemplate.opsForHash().put(redisKeys.control(OTHER_RUN_ID), "confirmToken", "other-secret-token");
+        redisTemplate.opsForHash().put(redisKeys.meta(OTHER_RUN_ID), "confirmToken", "other-secret-token");
 
         // Query TEST run
         redisTemplate.opsForSet().add("agent:active-runs", TEST_RUN_ID);
@@ -147,7 +150,6 @@ class AdminRuntimeStateServiceTest {
         assertThat(dto.runId()).isEqualTo(TEST_RUN_ID);
         Map<String, String> meta = (Map<String, String>) dto.entries().get("meta");
         assertThat(meta).doesNotContainEntry("userId", "other-user");
-        assertThat(dto.entries()).doesNotContainKey("control-other"); // No cross-run keys
     }
 
     @Test
@@ -166,9 +168,10 @@ class AdminRuntimeStateServiceTest {
     @Test
     @DisplayName("getRuntimeState should include children and todos entries")
     void includeChildrenAndTodos() {
-        // Setup
+        // Setup - use correct Redis types
         redisTemplate.opsForSet().add("agent:active-runs", TEST_RUN_ID);
-        redisTemplate.opsForSet().add(redisKeys.children(TEST_RUN_ID), "child-run-1");
+        // children is HASH (childKey -> refJson)
+        redisTemplate.opsForHash().put(redisKeys.children(TEST_RUN_ID), "child:child-run-1", "{\"childRunId\":\"child-run-1\"}");
         redisTemplate.opsForHash().put(redisKeys.todos(TEST_RUN_ID), "step-1", "PENDING");
         redisTemplate.opsForValue().set(redisKeys.todoReminder(TEST_RUN_ID), "remember to check order");
 

@@ -11,6 +11,7 @@ import { useRunDetail } from './hooks/useRunDetail'
 import { useRuntimeState } from './hooks/useRuntimeState'
 import { useChatStream } from './hooks/useChatStream'
 import { useChatMessages } from './hooks/useChatMessages'
+import { readSseStream } from './api/sseParser'
 import type { SseEvent } from './types'
 
 function App() {
@@ -84,47 +85,20 @@ function App() {
         throw new Error(`createRun failed: ${response.status}`)
       }
 
-      // Process SSE stream for create run
-      const reader = response.body?.getReader()
-      if (!reader) return
-
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      // Start streaming
+      // Start streaming - use local variable to track runId since React state is async
+      let currentRunId: string | null = null
       chatStream.startStream('pending')
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
+      // Use unified SSE stream reader
+      for await (const event of readSseStream(response)) {
+        handleSseEvent(event)
 
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() ?? ''
-
-        for (const line of lines) {
-          if (line.startsWith('data:')) {
-            const data = line.slice(5).trim()
-            if (data === '' || data === 'ping') continue
-
-            try {
-              const event = JSON.parse(data) as SseEvent
-              // Normalize toolName
-              if (event.type === 'tool_use' && 'name' in event && !event.toolName) {
-                event.toolName = (event as Record<string, unknown>).name as string
-              }
-              handleSseEvent(event)
-
-              // Set runId on first event
-              if (event.runId && chatStream.state.runId === 'pending') {
-                chatStream.startStream(event.runId)
-                runList.setSelectedRunId(event.runId)
-                runList.refresh()
-              }
-            } catch {
-              // Skip invalid JSON
-            }
-          }
+        // Set runId on first event - use local variable to avoid stale closure
+        if (event.runId && !currentRunId && event.runId !== 'pending') {
+          currentRunId = event.runId
+          chatStream.startStream(event.runId)
+          runList.setSelectedRunId(event.runId)
+          runList.refresh()
         }
       }
     } catch (error) {

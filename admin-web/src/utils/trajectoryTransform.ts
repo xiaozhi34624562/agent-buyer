@@ -183,7 +183,7 @@ export function transformTrajectory(dto: BackendTrajectoryDto): TrajectoryNode[]
 
   // Add events
   for (const evt of dto.events) {
-    let eventData: Record<string, unknown> = {}
+    let eventData: Record<string, unknown>
     try {
       eventData = JSON.parse(evt.payloadPreview)
     } catch {
