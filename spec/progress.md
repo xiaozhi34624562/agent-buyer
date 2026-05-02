@@ -349,7 +349,7 @@ V2 必须按 `V2.0 -> V2.1 -> V2.2` 顺序推进，里程碑内部按 `task.md` 
 - full：`MYSQL_PASSWORD=*** mvn test`，106 tests，0 failures，0 errors，`BUILD SUCCESS`。
 - `java-alibaba-review` 复审：未发现 P0/P1/P2；确认 Qwen adapter/profile/config 与 DeepSeek 隔离，默认入口暂不开放 `qwen-plus`。
 
-### V20-04 IN_PROGRESS
+### V20-04 DONE
 
 - 写入范围：`ProviderFallbackPolicy`、`LlmAttemptService` fallback 分支、`agent_llm_attempt` 写入扩展。
 - 前置：`V20-03`。
@@ -395,7 +395,7 @@ V2 必须按 `V2.0 -> V2.1 -> V2.2` 顺序推进，里程碑内部按 `task.md` 
 - 最终 full：`MYSQL_PASSWORD=*** mvn test`，92 tests，0 failures，0 errors，`BUILD SUCCESS`。
 - `java-alibaba-review` gate：未发现阻断 issue；确认 `WAITING_USER_CONFIRMATION / PAUSED` continuation 的原状态恢复路径由 CAS 保护，不覆盖终态。
 
-### V20-05 IN_PROGRESS
+### V20-05 DONE
 
 - 写入范围：`AgentExecutionBudget`、`AgentTurnOrchestrator` 嵌入预算检查、`agent_event` 新事件类型 `MAIN_TURN_BUDGET` / `RUN_WIDE_BUDGET`。
 - 前置：`V20-04`、`V20-04a`。
@@ -418,7 +418,7 @@ V2 必须按 `V2.0 -> V2.1 -> V2.2` 顺序推进，里程碑内部按 `task.md` 
 - full：`MYSQL_PASSWORD=*** mvn test`，120 tests，0 failures，0 errors，`BUILD SUCCESS`。
 - `java-alibaba-review` 复审：未发现阻断 issue；确认 Redis budget key TTL、fallback budget rejection 无 orphan event、helper 构造器不再绕过预算。
 
-### V20-06 IN_PROGRESS
+### V20-06 DONE
 
 - 写入范围：`ContextViewBuilder`、`ProviderViewMessage`、`LlmAttemptService` 调用前接入 view、复用 `TranscriptPairValidator`。
 - 前置：`V20-02`。
@@ -985,3 +985,26 @@ V2.2 必须在 `V21-GATE` 完成后启动。占位列表：
 ## V2 变更日志
 
 - 2026-05-01：起草 V2 progress 框架，沿用 V1a hardening 结构；V2.0 第一波执行计划与写入范围预约写入「V2.0 启动准备」。
+
+# Agent Buyer V3 Progress
+
+## V3 启动准备
+
+- 时间：2026-05-02 CST。
+- 背景：V2 已完成 agent loop、多 provider、context compact、skill、SubAgent、ToDo、多实例运行态、interrupt、真实 LLM E2E 与 HITL 语义确认；V3 开始建设 Agent Buyer Console，用浏览器展示 run list、trajectory timeline、runtime state、chat/SSE、HITL、interrupt 和 abort。
+- 当前文档状态：
+  - `requirement.md` 附录 B 已定义 V3 产品定位、边界、接口与验收。
+  - `design.md` 第 12 章已定义 V3 架构、数据流、安全边界、前端工程与里程碑。
+  - `task.md` 已拆解 `V3-M1` 到 `V3-M5`，当前全部为 `PENDING`。
+  - `package-architecture.md` 已补充 V3 `web.admin` 后端 package 与 `admin-web` 前端目录边界。
+- V3 关键约束：
+  - 对话能力复用现有 `/api/agent/*`，不新增 `/api/admin/chat`。
+  - Admin 只新增 `GET /api/admin/console/runs` 与 `GET /api/admin/console/runs/{runId}/runtime-state`。
+  - Console 不是通用 MySQL / Redis browser，不提供任意 SQL、任意 Redis key 查询或动态 sort/table 参数。
+  - Runtime state 只返回当前 run 固定 key 的投影；`agent:active-runs` 只用于计算 `activeRun` 布尔值，不返回完整 set。
+  - `confirmToken`、admin token、provider key、原始 provider payload 和大 tool result 必须在后端 DTO 与前端展示双层脱敏。
+  - V3 前端 POST SSE 必须使用自研 parser；`tool_use` 事件以 `toolName` 为规范字段，并兼容历史 `name`。
+- 下一步：
+  - 从 `V3M1-01` 开始，先补 V3 实施基线与现有 endpoint / DTO / Redis key 清单。
+  - 每完成一个 V3 task，同步更新 `task.md` 状态与本文件进度记录。
+  - 每个里程碑 gate 沿用主 agent 分发与验收、sub agent 执行的工作流；Java/YAML/SQL 变更使用 `java-alibaba-review` gate，前端 React/TypeScript 变更使用 `front-alibaba-review` gate。
