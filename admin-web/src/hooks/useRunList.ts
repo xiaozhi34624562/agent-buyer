@@ -67,6 +67,7 @@ export function useRunList(options: UseRunListOptions = {}): UseRunListResult {
   }, [adminToken, page, pageSize, statusFilter, userIdFilter])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- standard data fetching pattern
     fetchRuns()
   }, [fetchRuns])
 

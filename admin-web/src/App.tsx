@@ -165,7 +165,7 @@ function App() {
       headers: { 'X-User-Id': userId },
     })
     runList.refresh()
-  }, [runList.selectedRunId, userId, runList])
+  }, [userId, runList])
 
   // Abort handler
   const handleAbort = useCallback(async () => {
@@ -175,7 +175,7 @@ function App() {
       headers: { 'X-User-Id': userId },
     })
     runList.refresh()
-  }, [runList.selectedRunId, userId, runList])
+  }, [userId, runList])
 
   // Confirm handler
   const handleConfirm = useCallback(() => {

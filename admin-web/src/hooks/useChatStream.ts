@@ -71,7 +71,7 @@ export function useChatStream(): UseChatStreamResult {
         }))
         break
 
-      case 'tool_use':
+      case 'tool_use': {
         const newToolCard: ToolCard = {
           toolCallId: event.toolCallId || '',
           toolName: event.toolName || '',
@@ -84,8 +84,9 @@ export function useChatStream(): UseChatStreamResult {
           toolCards: Array.from(toolCardsRef.current.values()),
         }))
         break
+      }
 
-      case 'tool_progress':
+      case 'tool_progress': {
         const progressCard = toolCardsRef.current.get(event.toolCallId || '')
         if (progressCard) {
           progressCard.status = 'running'
@@ -97,8 +98,9 @@ export function useChatStream(): UseChatStreamResult {
           }))
         }
         break
+      }
 
-      case 'tool_result':
+      case 'tool_result': {
         const resultCard = toolCardsRef.current.get(event.toolCallId || '')
         if (resultCard) {
           resultCard.status = 'completed'
@@ -110,6 +112,7 @@ export function useChatStream(): UseChatStreamResult {
           }))
         }
         break
+      }
 
       case 'final':
         setState(prev => ({
