@@ -1,5 +1,6 @@
 package com.ai.agent.todo.runtime;
 
+import com.ai.agent.tool.runtime.redis.RedisKeys;
 import com.ai.agent.todo.model.TodoDraft;
 import com.ai.agent.todo.model.TodoStatus;
 import com.ai.agent.todo.model.TodoStep;
@@ -24,11 +25,11 @@ public class RedisTodoStore implements TodoStore {
             return #ARGV / 2
             """;
 
-    private final TodoRedisKeys keys;
+    private final RedisKeys keys;
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
 
-    public RedisTodoStore(TodoRedisKeys keys, StringRedisTemplate redisTemplate, ObjectMapper objectMapper) {
+    public RedisTodoStore(RedisKeys keys, StringRedisTemplate redisTemplate, ObjectMapper objectMapper) {
         this.keys = keys;
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
@@ -98,7 +99,7 @@ public class RedisTodoStore implements TodoStore {
 
     @Override
     public void recordReminder(String runId, int turnNo, List<TodoStep> openSteps) {
-        redisTemplate.opsForHash().putAll(keys.reminder(runId), Map.of(
+        redisTemplate.opsForHash().putAll(keys.todoReminder(runId), Map.of(
                 "turnNo", Integer.toString(turnNo),
                 "steps", toJson(openSteps == null ? List.of() : openSteps),
                 "updatedAt", Instant.now().toString()

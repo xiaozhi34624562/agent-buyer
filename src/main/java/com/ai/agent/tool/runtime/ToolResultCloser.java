@@ -58,6 +58,8 @@ public final class ToolResultCloser {
         if (terminals == null || terminals.isEmpty()) {
             return;
         }
+        // Load snapshot once to avoid N+1 pattern - previously loaded per terminal
+        ClosedState closed = loadClosedState(runId);
         Map<String, ToolCall> callsById = trajectoryReader.findToolCallsByRun(runId).stream()
                 .collect(Collectors.toMap(ToolCall::toolCallId, call -> call, (left, right) -> left, LinkedHashMap::new));
         for (ToolTerminal terminal : terminals) {
@@ -66,7 +68,7 @@ public final class ToolResultCloser {
                 log.warn("tool terminal cannot be closed because tool call is missing toolCallId={}", terminal.toolCallId());
                 continue;
             }
-            closeTerminalWithFreshState(runId, call, terminal, sink);
+            closeTerminal(runId, call, terminal, sink, closed);
         }
     }
 

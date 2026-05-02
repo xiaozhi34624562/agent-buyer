@@ -1,6 +1,7 @@
 package com.ai.agent.todo.runtime;
 
 import com.ai.agent.config.AgentProperties;
+import com.ai.agent.tool.runtime.redis.RedisKeys;
 import com.ai.agent.todo.model.TodoDraft;
 import com.ai.agent.todo.model.TodoStatus;
 import com.ai.agent.todo.model.TodoStep;
@@ -23,7 +24,7 @@ import static org.mockito.Mockito.when;
 class TodoStoreTest {
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
     private final AgentProperties properties = new AgentProperties();
-    private final TodoRedisKeys keys = new TodoRedisKeys(properties);
+    private final RedisKeys keys = new RedisKeys(properties);
     private final StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
     @SuppressWarnings("rawtypes")
     private final HashOperations hashOps = mock(HashOperations.class);
@@ -81,7 +82,7 @@ class TodoStoreTest {
 
         store.recordReminder("run-1", 6, steps);
 
-        assertThat(keys.reminder("run-1")).isEqualTo("agent:{run:run-1}:todo-reminder");
+        assertThat(keys.todoReminder("run-1")).isEqualTo("agent:{run:run-1}:todo-reminder");
         verify(hashOps).putAll(eq("agent:{run:run-1}:todo-reminder"), anyMap());
     }
 }
