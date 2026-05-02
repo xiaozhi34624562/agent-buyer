@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { Send, Square, Check, X, Plus, RefreshCw, PauseCircle, XCircle } from 'lucide-react'
+import { Send, Square, Check, X, Plus, RefreshCw } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Panel } from '../ui/Panel'
 import type { ToolCard } from '../../types'
@@ -169,7 +169,7 @@ export function ChatPanel({
     <Panel title="Chat" className="h-full flex flex-col">
       {/* Run controls - at top of chat panel */}
       <div
-        className="px-4 py-2 flex items-center gap-2"
+        className="px-3 py-2 flex items-center gap-1.5 flex-wrap"
         style={{
           borderBottom: '1px solid var(--color-border-subtle)',
           background: 'var(--color-bg-subtle)',
@@ -203,7 +203,6 @@ export function ChatPanel({
           onClick={onInterrupt}
           disabled={!hasSelection || isTerminal || isStreaming}
         >
-          <PauseCircle className="w-3.5 h-3.5" />
           Interrupt
         </Button>
 
@@ -213,7 +212,6 @@ export function ChatPanel({
           onClick={onAbort}
           disabled={!hasSelection || isTerminal || isStreaming}
         >
-          <XCircle className="w-3.5 h-3.5" />
           Abort
         </Button>
       </div>
