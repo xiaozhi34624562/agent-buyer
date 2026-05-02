@@ -24,6 +24,49 @@ export interface RuntimeState {
   entries: Record<string, unknown>
 }
 
+// Trajectory timeline node types
+export type TrajectoryNodeType =
+  | 'MESSAGE'
+  | 'LLM_ATTEMPT'
+  | 'TOOL_CALL'
+  | 'TOOL_PROGRESS'
+  | 'TOOL_RESULT'
+  | 'EVENT'
+  | 'COMPACTION'
+
+export interface TrajectoryNode {
+  nodeId: string
+  nodeType: TrajectoryNodeType
+  timestamp: string | null
+  parentId: string | null
+  attemptId: string | null
+  toolCallId: string | null
+  role?: 'user' | 'assistant' | 'system'
+  content?: string
+  provider?: string
+  model?: string
+  inputTokens?: number
+  outputTokens?: number
+  toolName?: string
+  args?: Record<string, unknown>
+  result?: string
+  percent?: number
+  message?: string
+  eventType?: string
+  eventData?: Record<string, unknown>
+  synthetic?: boolean
+  cancelReason?: string
+  strategy?: string
+  beforeTokens?: number
+  afterTokens?: number
+  compactedMessageIds?: string[]
+}
+
+export interface Trajectory {
+  runId: string
+  nodes: TrajectoryNode[]
+}
+
 // SSE event types
 export interface SseEvent {
   type: string

@@ -1,4 +1,4 @@
-import type { SseEvent } from '../types'
+import type { SseEvent, Trajectory } from '../types'
 
 const API_BASE = '/api/agent'
 
@@ -60,7 +60,7 @@ export function createAgentApi(config: AgentApiConfig) {
     return response.url
   }
 
-  async function getTrajectory(runId: string): Promise<unknown> {
+  async function getTrajectory(runId: string): Promise<Trajectory> {
     const response = await fetch(`${API_BASE}/runs/${runId}`, {
       method: 'GET',
       headers: headers(),
@@ -70,7 +70,7 @@ export function createAgentApi(config: AgentApiConfig) {
       throw new Error(`getTrajectory failed: ${response.status}`)
     }
 
-    return response.json()
+    return response.json() as Promise<Trajectory>
   }
 
   async function abortRun(runId: string): Promise<void> {
