@@ -17,6 +17,7 @@ export interface UseChatMessagesResult {
   messages: ChatMessage[]
   sendMessage: (runId: string, content: string) => Promise<void>
   sendConfirmation: (runId: string, confirmed: boolean) => Promise<void>
+  addUserMessage: (content: string) => void
   addAssistantMessage: (content: string, toolCards?: ChatMessage['toolCards']) => void
   clearMessages: () => void
   setMessagesFromTrajectory: (nodes: TrajectoryNode[]) => void
@@ -28,6 +29,10 @@ export function useChatMessages(options: UseChatMessagesOptions): UseChatMessage
 
   const addAssistantMessage = useCallback((content: string, toolCards?: ChatMessage['toolCards']) => {
     setMessages(prev => [...prev, { role: 'assistant', content, toolCards }])
+  }, [])
+
+  const addUserMessage = useCallback((content: string) => {
+    setMessages(prev => [...prev, { role: 'user', content }])
   }, [])
 
   const clearMessages = useCallback(() => {
@@ -92,6 +97,7 @@ export function useChatMessages(options: UseChatMessagesOptions): UseChatMessage
     messages,
     sendMessage,
     sendConfirmation,
+    addUserMessage,
     addAssistantMessage,
     clearMessages,
     setMessagesFromTrajectory,

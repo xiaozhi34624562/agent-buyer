@@ -80,6 +80,12 @@ function App() {
 
   // Create new run
   const handleCreateRun = useCallback(async (prompt: string) => {
+    // Reset processed run tracking for new run
+    processedRunIdRef.current = null
+
+    // Add user message to chat history immediately
+    chatMessages.addUserMessage(prompt)
+
     try {
       const response = await fetch('/api/agent/runs', {
         method: 'POST',
