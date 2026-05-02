@@ -1134,3 +1134,33 @@ V3M1-02 需新增以上配置项，并实现 `AdminAccessGuard` 校验。
 
 - V3M1-GATE：手工 smoke 验证两个 endpoint
 - 然后开始 V3-M2 Frontend Shell
+
+### V3M1-GATE Smoke 验证记录
+
+- 时间：2026-05-02 CST。
+- 状态：`DONE`。
+- 环境：`mvn spring-boot:run -Dspring-boot.run.profiles=local`
+
+#### Run List Endpoint 验证
+
+- URL：`GET /api/admin/console/runs`
+- 响应：HTTP 200，返回 20 条 run 记录
+- 字段验证：runId, userId, status, turnNo, agentType, parentRunId, parentLinkStatus, primaryProvider, fallbackProvider, model, maxTurns, startedAt, updatedAt, completedAt, lastError
+- 排序验证：按 updatedAt DESC 排序
+
+#### Runtime State Endpoint 验证
+
+- URL：`GET /api/admin/console/runs/{runId}/runtime-state`
+- 测试 runId：`run_moni70ez_ad9ce2b7e03e1210`（PAUSED）
+- 响应：HTTP 200
+- 字段验证：
+  - `runId` 正确
+  - `activeRun=false`（布尔值，非完整 set）
+  - `entries` 包含固定 key：meta, queue, tools, leases, control, children, todos, todo-reminder
+  - `meta` 包含 interrupt_requested/interrupt_at，无 confirmToken
+  - 无完整 `agent:active-runs` set
+
+#### 结论
+
+- V3-M1 Backend Console API 完成
+- 开始 V3-M2 Frontend Shell
