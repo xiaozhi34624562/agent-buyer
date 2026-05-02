@@ -4,7 +4,7 @@ import { createAgentApi } from '../api/agentApi'
 import { transformTrajectory } from '../utils/trajectoryTransform'
 
 export interface UseRunDetailOptions {
-  userId?: string
+  getUserIdForRun?: (runId: string) => string | undefined
 }
 
 export interface UseRunDetailResult {
@@ -48,13 +48,14 @@ function parseTrajectoryResponse(data: unknown): Trajectory {
 }
 
 export function useRunDetail(options: UseRunDetailOptions = {}): UseRunDetailResult {
-  const { userId } = options
+  const { getUserIdForRun } = options
 
   const [trajectory, setTrajectory] = useState<Trajectory | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const fetchTrajectory = useCallback(async (runId: string) => {
+    const userId = getUserIdForRun?.(runId)
     if (!userId) {
       setError('userId is required')
       return
@@ -74,7 +75,7 @@ export function useRunDetail(options: UseRunDetailOptions = {}): UseRunDetailRes
     } finally {
       setLoading(false)
     }
-  }, [userId])
+  }, [getUserIdForRun])
 
   const clearTrajectory = useCallback(() => {
     setTrajectory(null)

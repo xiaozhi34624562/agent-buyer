@@ -33,7 +33,9 @@ function App() {
 
   // Hooks for data
   const runList = useRunList({ adminToken })
-  const runDetail = useRunDetail({ userId })
+  const runDetail = useRunDetail({
+    getUserIdForRun: (runId) => runList.runs.find(r => r.runId === runId)?.userId
+  })
   const runtimeState = useRuntimeState({ adminToken })
   const chatStream = useChatStream()
 
