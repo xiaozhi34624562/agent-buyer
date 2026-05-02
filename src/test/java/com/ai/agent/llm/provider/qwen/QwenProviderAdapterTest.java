@@ -8,6 +8,7 @@ import com.ai.agent.llm.model.LlmStreamResult;
 import com.ai.agent.llm.model.LlmUsage;
 import com.ai.agent.llm.model.ToolCallMessage;
 import com.ai.agent.llm.provider.LlmCallObserver;
+import com.ai.agent.llm.provider.OpenAiCompatibilityProfile;
 import com.ai.agent.llm.provider.ProviderCallException;
 import com.ai.agent.llm.provider.ProviderErrorType;
 import com.ai.agent.tool.core.ToolSchema;
@@ -58,7 +59,7 @@ class QwenProviderAdapterTest {
         AgentProperties properties = qwenProperties();
         QwenProviderAdapter adapter = new QwenProviderAdapter(
                 properties,
-                new QwenCompatibilityProfile(objectMapper),
+                new OpenAiCompatibilityProfile(objectMapper),
                 objectMapper
         );
         List<String> textDeltas = new ArrayList<>();
@@ -92,7 +93,7 @@ class QwenProviderAdapterTest {
         startServer(400, "{\"error\":{\"message\":\"bad request secret prompt fragment\"}}");
         QwenProviderAdapter adapter = new QwenProviderAdapter(
                 qwenProperties(),
-                new QwenCompatibilityProfile(objectMapper),
+                new OpenAiCompatibilityProfile(objectMapper),
                 objectMapper
         );
 
@@ -113,7 +114,7 @@ class QwenProviderAdapterTest {
         startServer(500, "{\"error\":{\"message\":\"temporary secret prompt fragment\"}}");
         QwenProviderAdapter adapter = new QwenProviderAdapter(
                 qwenProperties(),
-                new QwenCompatibilityProfile(objectMapper),
+                new OpenAiCompatibilityProfile(objectMapper),
                 objectMapper
         );
         AtomicInteger observedProviderCalls = new AtomicInteger();
@@ -138,14 +139,14 @@ class QwenProviderAdapterTest {
         properties.getLlm().getQwen().setApiKey(" ");
         QwenProviderAdapter adapter = new QwenProviderAdapter(
                 properties,
-                new QwenCompatibilityProfile(objectMapper),
+                new OpenAiCompatibilityProfile(objectMapper),
                 objectMapper
         );
 
         assertThatThrownBy(() -> adapter.streamChat(request(), ignored -> {
         }))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessage("QWEN_API_KEY is required");
+                .hasMessage("Qwen_API_KEY is required");
         assertThat(requestCount).hasValue(0);
     }
 
@@ -167,7 +168,7 @@ class QwenProviderAdapterTest {
         properties.getLlm().getQwen().setDefaultModel("qwen-custom");
         QwenProviderAdapter adapter = new QwenProviderAdapter(
                 properties,
-                new QwenCompatibilityProfile(objectMapper),
+                new OpenAiCompatibilityProfile(objectMapper),
                 objectMapper
         );
 
@@ -202,7 +203,7 @@ class QwenProviderAdapterTest {
         try {
             QwenProviderAdapter adapter = new QwenProviderAdapter(
                     qwenProperties(),
-                    new QwenCompatibilityProfile(objectMapper),
+                    new OpenAiCompatibilityProfile(objectMapper),
                     objectMapper
             );
 

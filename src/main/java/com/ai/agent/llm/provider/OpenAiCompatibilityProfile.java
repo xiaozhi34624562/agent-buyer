@@ -1,6 +1,5 @@
-package com.ai.agent.llm.provider.qwen;
+package com.ai.agent.llm.provider;
 
-import com.ai.agent.llm.provider.ProviderCompatibilityProfile;
 import com.ai.agent.tool.core.ToolSchema;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -8,11 +7,15 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Component;
 
+/**
+ * OpenAI-compatible tool schema format.
+ * Used by providers that follow OpenAI's function calling convention.
+ */
 @Component
-public final class QwenCompatibilityProfile implements ProviderCompatibilityProfile {
+public final class OpenAiCompatibilityProfile implements ProviderCompatibilityProfile {
     private final ObjectMapper objectMapper;
 
-    public QwenCompatibilityProfile(ObjectMapper objectMapper) {
+    public OpenAiCompatibilityProfile(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
 

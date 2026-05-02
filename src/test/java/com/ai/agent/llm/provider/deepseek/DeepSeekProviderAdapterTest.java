@@ -6,6 +6,7 @@ import com.ai.agent.llm.model.LlmChatRequest;
 import com.ai.agent.llm.model.LlmMessage;
 import com.ai.agent.llm.model.LlmStreamResult;
 import com.ai.agent.llm.model.LlmUsage;
+import com.ai.agent.llm.provider.OpenAiCompatibilityProfile;
 import com.ai.agent.llm.provider.ProviderCallException;
 import com.ai.agent.llm.provider.ProviderErrorType;
 import com.ai.agent.tool.core.ToolSchema;
@@ -48,7 +49,7 @@ class DeepSeekProviderAdapterTest {
                 """);
         DeepSeekProviderAdapter adapter = new DeepSeekProviderAdapter(
                 deepSeekProperties(),
-                new DeepSeekCompatibilityProfile(objectMapper),
+                new OpenAiCompatibilityProfile(objectMapper),
                 objectMapper
         );
 
@@ -70,7 +71,7 @@ class DeepSeekProviderAdapterTest {
         startServer(400, "{\"error\":{\"message\":\"bad request secret prompt fragment\"}}");
         DeepSeekProviderAdapter adapter = new DeepSeekProviderAdapter(
                 deepSeekProperties(),
-                new DeepSeekCompatibilityProfile(objectMapper),
+                new OpenAiCompatibilityProfile(objectMapper),
                 objectMapper
         );
 
@@ -91,7 +92,7 @@ class DeepSeekProviderAdapterTest {
         startServer(500, "{\"error\":{\"message\":\"temporary secret prompt fragment\"}}");
         DeepSeekProviderAdapter adapter = new DeepSeekProviderAdapter(
                 deepSeekProperties(),
-                new DeepSeekCompatibilityProfile(objectMapper),
+                new OpenAiCompatibilityProfile(objectMapper),
                 objectMapper
         );
 
@@ -112,7 +113,7 @@ class DeepSeekProviderAdapterTest {
         startServer(200, "data: {not-json}\n\n");
         DeepSeekProviderAdapter adapter = new DeepSeekProviderAdapter(
                 deepSeekProperties(),
-                new DeepSeekCompatibilityProfile(objectMapper),
+                new OpenAiCompatibilityProfile(objectMapper),
                 objectMapper
         );
 

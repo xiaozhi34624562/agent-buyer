@@ -1,4 +1,4 @@
-package com.ai.agent.llm.provider.qwen;
+package com.ai.agent.llm.provider;
 
 import com.ai.agent.tool.core.ToolSchema;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -10,8 +10,8 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class QwenCompatibilityProfileTest {
-    private final QwenCompatibilityProfile profile = new QwenCompatibilityProfile(new ObjectMapper());
+class OpenAiCompatibilityProfileTest {
+    private final OpenAiCompatibilityProfile profile = new OpenAiCompatibilityProfile(new ObjectMapper());
 
     @Test
     void convertsToolSchemaToOpenAiCompatibleFunctionTool() {
