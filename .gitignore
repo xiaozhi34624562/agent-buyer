@@ -7,3 +7,5 @@ logs/
 .env
 .env.*
 application-local.yml
+spec/employee.md
+spec/employee-1.md

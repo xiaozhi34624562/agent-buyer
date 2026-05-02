@@ -1,8 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { ConsoleShell } from './components/console/ConsoleShell'
-import { Panel } from './components/ui/Panel'
 import { RunListPanel } from './components/runs/RunListPanel'
-import { RunControls } from './components/runs/RunControls'
 import { TimelinePanel } from './components/timeline/TimelinePanel'
 import { DebugDrawer } from './components/debug/DebugDrawer'
 import { ChatPanel } from './components/chat/ChatPanel'
@@ -62,6 +60,24 @@ function App() {
 
   const chatMessages = useChatMessages({ userId, onEvent: handleSseEvent })
 
+  // Track which run's trajectory has been processed to avoid re-processing
+  const processedRunIdRef = useRef<string | null>(null)
+
+  // When trajectory loads for a terminal run, build chat messages from it
+  useEffect(() => {
+    if (runDetail.nodes.length > 0 && runList.selectedRunId && !runDetail.loading) {
+      // Only process if this run hasn't been processed yet
+      if (processedRunIdRef.current !== runList.selectedRunId) {
+        const run = runList.runs.find(r => r.runId === runList.selectedRunId)
+        if (run && TERMINAL_STATUSES.includes(run.status)) {
+          processedRunIdRef.current = runList.selectedRunId
+          chatMessages.setMessagesFromTrajectory(runDetail.nodes)
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runDetail.nodes, runDetail.loading, runList.selectedRunId, runList.runs])
+
   // Create new run
   const handleCreateRun = useCallback(async (prompt: string) => {
     try {
@@ -103,14 +119,29 @@ function App() {
     }
   }, [userId, chatStream, runList, handleSseEvent])
 
+  // Terminal statuses that don't need streaming
+  const TERMINAL_STATUSES = ['SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMEOUT']
+
   // Handle run selection
   const handleSelectRun = useCallback((runId: string) => {
+    // Reset processed run tracking
+    processedRunIdRef.current = null
+
     runList.setSelectedRunId(runId)
     runDetail.fetchTrajectory(runId)
     runtimeState.fetchRuntimeState(runId)
     chatStream.resetState()
-    chatStream.startStream(runId)
     chatMessages.clearMessages()
+
+    // Check if run is already completed - don't start streaming for terminal runs
+    const run = runList.runs.find(r => r.runId === runId)
+    if (run && TERMINAL_STATUSES.includes(run.status)) {
+      // Set status directly without streaming
+      chatStream.setRunStatus(runId, run.status)
+    } else {
+      // For active runs, start streaming
+      chatStream.startStream(runId)
+    }
   }, [runList, runDetail, runtimeState, chatStream, chatMessages])
 
   // Refresh handler
@@ -126,7 +157,8 @@ function App() {
   const handleNewChat = useCallback(() => {
     chatStream.resetState()
     chatMessages.clearMessages()
-  }, [chatStream, chatMessages])
+    runList.setSelectedRunId(null)
+  }, [chatStream, chatMessages, runList])
 
   // Interrupt handler
   const handleInterrupt = useCallback(async () => {
@@ -176,57 +208,48 @@ function App() {
     setDebug(false)
   }, [])
 
-  // Build panels
+  // Build panels - NO extra Panel wrapper, components handle their own Panel
   const runsPanel = (
-    <Panel title="Runs">
-      <RunControls
-        selectedRunId={runList.selectedRunId}
-        runStatus={chatStream.state.runStatus}
-        isStreaming={chatStream.state.isStreaming}
-        onNewChat={handleNewChat}
-        onRefreshRun={handleRefresh}
-        onInterrupt={handleInterrupt}
-        onAbort={handleAbort}
-      />
-      <RunListPanel
-        runs={runList.runs}
-        loading={runList.loading}
-        error={runList.error}
-        selectedRunId={runList.selectedRunId}
-        onSelectRun={handleSelectRun}
-        statusFilter={runList.statusFilter}
-        userIdFilter={runList.userIdFilter}
-        onStatusFilterChange={runList.setStatusFilter}
-        onUserIdFilterChange={runList.setUserIdFilter}
-      />
-    </Panel>
+    <RunListPanel
+      runs={runList.runs}
+      loading={runList.loading}
+      error={runList.error}
+      selectedRunId={runList.selectedRunId}
+      onSelectRun={handleSelectRun}
+      statusFilter={runList.statusFilter}
+      userIdFilter={runList.userIdFilter}
+      onStatusFilterChange={runList.setStatusFilter}
+      onUserIdFilterChange={runList.setUserIdFilter}
+    />
   )
 
   const timelinePanel = (
-    <Panel title="Timeline">
-      <TimelinePanel
-        nodes={runDetail.nodes}
-        loading={runDetail.loading}
-        error={runDetail.error}
-      />
-    </Panel>
+    <TimelinePanel
+      nodes={runDetail.nodes}
+      loading={runDetail.loading}
+      error={runDetail.error}
+    />
   )
 
   const chatPanel = (
-    <Panel title="Chat">
-      <ChatPanel
-        assistantDraft={chatStream.state.assistantDraft}
-        toolCards={chatStream.state.toolCards}
-        isStreaming={chatStream.state.isStreaming}
-        runStatus={chatStream.state.runStatus}
-        nextActionRequired={chatStream.state.nextActionRequired}
-        messages={chatMessages.messages}
-        onSendMessage={handleSendMessage}
-        onConfirm={handleConfirm}
-        onReject={handleReject}
-        onStopStream={chatStream.stopStream}
-      />
-    </Panel>
+    <ChatPanel
+      assistantDraft={chatStream.state.assistantDraft}
+      toolCards={chatStream.state.toolCards}
+      isStreaming={chatStream.state.isStreaming}
+      runStatus={chatStream.state.runStatus}
+      nextActionRequired={chatStream.state.nextActionRequired}
+      messages={chatMessages.messages}
+      onSendMessage={handleSendMessage}
+      onConfirm={handleConfirm}
+      onReject={handleReject}
+      onStopStream={chatStream.stopStream}
+      // Pass controls to ChatPanel
+      selectedRunId={runList.selectedRunId}
+      onNewChat={handleNewChat}
+      onRefreshRun={handleRefresh}
+      onInterrupt={handleInterrupt}
+      onAbort={handleAbort}
+    />
   )
 
   return (

@@ -1,13 +1,15 @@
 import type { TrajectoryNode, TrajectoryNodeType } from '../../types'
+import { Panel } from '../ui/Panel'
 
 interface TimelineNodeProps {
   node: TrajectoryNode
+  index: number
 }
 
 function formatTimestamp(timestamp: string | null): string {
   if (!timestamp) return ''
   const date = new Date(timestamp)
-  return date.toLocaleString('zh-CN', {
+  return date.toLocaleTimeString('zh-CN', {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
@@ -15,37 +17,95 @@ function formatTimestamp(timestamp: string | null): string {
 }
 
 function NodeTypeBadge({ nodeType }: { nodeType: TrajectoryNodeType }) {
-  const colors: Record<TrajectoryNodeType, string> = {
-    MESSAGE: 'bg-purple-100 text-purple-700',
-    LLM_ATTEMPT: 'bg-indigo-100 text-indigo-700',
-    TOOL_CALL: 'bg-blue-100 text-blue-700',
-    TOOL_PROGRESS: 'bg-cyan-100 text-cyan-700',
-    TOOL_RESULT: 'bg-green-100 text-green-700',
-    EVENT: 'bg-orange-100 text-orange-700',
-    COMPACTION: 'bg-gray-100 text-gray-700',
+  const getStyles = (): React.CSSProperties => {
+    const base: React.CSSProperties = {
+      fontFamily: 'var(--font-sans)',
+      fontSize: '0.65rem',
+      fontWeight: 500,
+      padding: '0.15rem 0.35rem',
+      borderRadius: 'var(--radius-sm)',
+      letterSpacing: '0.05em',
+      textTransform: 'uppercase',
+    }
+
+    switch (nodeType) {
+      case 'MESSAGE':
+        return { ...base, background: '#f0ede8', color: 'var(--color-text-secondary)' }
+      case 'LLM_ATTEMPT':
+        return { ...base, background: '#e5e0f0', color: '#7050a0' }
+      case 'TOOL_CALL':
+        return { ...base, background: 'var(--color-accent-subtle)', color: 'var(--color-accent-hover)' }
+      case 'TOOL_PROGRESS':
+        return { ...base, background: '#e8f5e8', color: 'var(--color-success)' }
+      case 'TOOL_RESULT':
+        return { ...base, background: '#e8ebe8', color: 'var(--color-success)' }
+      case 'EVENT':
+        return { ...base, background: '#f5ebe0', color: 'var(--color-warning)' }
+      case 'COMPACTION':
+        return { ...base, background: 'var(--color-bg-subtle)', color: 'var(--color-text-muted)' }
+      default:
+        return { ...base, background: 'var(--color-bg-subtle)', color: 'var(--color-text-secondary)' }
+    }
   }
-  return (
-    <span className={`px-2 py-0.5 rounded text-xs font-medium ${colors[nodeType]}`}>
-      {nodeType}
-    </span>
-  )
+
+  // Shorten labels for readability
+  const labels: Partial<Record<TrajectoryNodeType, string>> = {
+    MESSAGE: 'MSG',
+    LLM_ATTEMPT: 'LLM',
+    TOOL_CALL: 'CALL',
+    TOOL_PROGRESS: 'PROG',
+    TOOL_RESULT: 'RES',
+    EVENT: 'EVT',
+    COMPACTION: 'CMP',
+  }
+
+  return <span style={getStyles()}>{labels[nodeType] || nodeType}</span>
 }
 
 function MessageNode({ node }: TimelineNodeProps) {
-  const roleColors: Record<string, string> = {
-    user: 'text-blue-600',
-    assistant: 'text-green-600',
-    system: 'text-gray-600',
+  const getRoleColor = () => {
+    switch (node.role) {
+      case 'user': return 'var(--color-accent)'
+      case 'assistant': return 'var(--color-success)'
+      case 'system': return 'var(--color-text-muted)'
+      default: return 'var(--color-text)'
+    }
   }
+
   return (
-    <div className="p-2">
-      <div className="flex items-center gap-2 mb-1">
-        <span className={`font-medium ${roleColors[node.role || 'user']}`}>
+    <div className="px-3 py-2">
+      {/* Role indicator */}
+      <div className="flex items-center gap-2 mb-1.5">
+        <span
+          style={{
+            fontFamily: 'var(--font-sans)',
+            fontWeight: 500,
+            fontSize: '0.8rem',
+            color: getRoleColor(),
+          }}
+        >
           {node.role}
         </span>
-        <span className="text-xs text-gray-400">{formatTimestamp(node.timestamp)}</span>
+        <span
+          style={{
+            fontFamily: 'var(--font-sans)',
+            fontSize: '0.7rem',
+            color: 'var(--color-text-muted)',
+          }}
+        >
+          {formatTimestamp(node.timestamp)}
+        </span>
       </div>
-      <div className="text-sm text-gray-700 whitespace-pre-wrap max-h-32 overflow-auto">
+
+      {/* Content */}
+      <div
+        className="text-sm max-h-24 overflow-auto"
+        style={{
+          fontFamily: 'var(--font-serif)',
+          color: 'var(--color-text)',
+          lineHeight: 1.5,
+        }}
+      >
         {node.content}
       </div>
     </div>
@@ -54,98 +114,277 @@ function MessageNode({ node }: TimelineNodeProps) {
 
 function LlmAttemptNode({ node }: TimelineNodeProps) {
   return (
-    <div className="p-2">
-      <div className="flex items-center gap-2 mb-1">
-        <span className="text-xs text-gray-400">{formatTimestamp(node.timestamp)}</span>
+    <div className="px-3 py-2">
+      {/* Provider/Model */}
+      <div
+        className="mb-1"
+        style={{
+          fontFamily: 'var(--font-sans)',
+          fontSize: '0.75rem',
+          color: 'var(--color-text)',
+        }}
+      >
+        {node.provider} · {node.model}
       </div>
-      <div className="text-sm text-gray-600">
-        Provider: {node.provider} | Model: {node.model}
+
+      {/* Token usage */}
+      <div
+        style={{
+          fontFamily: 'var(--font-sans)',
+          fontSize: '0.7rem',
+          color: 'var(--color-text-muted)',
+        }}
+      >
+        {node.inputTokens} in → {node.outputTokens} out
+        {node.totalTokens && <span className="ml-2">({node.totalTokens} total)</span>}
       </div>
-      <div className="text-xs text-gray-500">
-        Tokens: {node.inputTokens} in / {node.outputTokens} out
-      </div>
+
+      {/* Finish reason */}
+      {node.finishReason && (
+        <div
+          className="mt-1"
+          style={{
+            fontFamily: 'var(--font-sans)',
+            fontSize: '0.65rem',
+            color: 'var(--color-accent)',
+            textTransform: 'uppercase',
+          }}
+        >
+          {node.finishReason}
+        </div>
+      )}
     </div>
   )
 }
 
 function ToolCallNode({ node }: TimelineNodeProps) {
   return (
-    <div className="p-2">
-      <div className="flex items-center gap-2 mb-1">
-        <span className="font-medium text-blue-600">{node.toolName}</span>
-        <span className="text-xs text-gray-400">{formatTimestamp(node.timestamp)}</span>
+    <div className="px-3 py-2">
+      {/* Tool name */}
+      <div className="flex items-center gap-2 mb-1.5">
+        <span
+          style={{
+            fontFamily: 'var(--font-sans)',
+            fontWeight: 500,
+            fontSize: '0.85rem',
+            color: 'var(--color-accent)',
+          }}
+        >
+          {node.toolName}
+        </span>
+        <span
+          style={{
+            fontFamily: 'var(--font-sans)',
+            fontSize: '0.65rem',
+            color: 'var(--color-text-muted)',
+          }}
+        >
+          {formatTimestamp(node.timestamp)}
+        </span>
       </div>
-      <div className="text-xs text-gray-500">
-        Args: {JSON.stringify(node.args)}
-      </div>
+
+      {/* Args - collapsible/expandable would be nice but keep simple */}
+      {node.args && (
+        <div
+          className="text-xs max-h-16 overflow-auto rounded p-1.5"
+          style={{
+            fontFamily: 'var(--font-serif)',
+            background: 'var(--color-bg-subtle)',
+            color: 'var(--color-text-secondary)',
+          }}
+        >
+          {JSON.stringify(node.args, null, 2)}
+        </div>
+      )}
     </div>
   )
 }
 
 function ToolProgressNode({ node }: TimelineNodeProps) {
   return (
-    <div className="p-2">
+    <div className="px-3 py-2">
+      {/* Progress bar */}
       <div className="flex items-center gap-2 mb-1">
-        <span className="text-xs text-gray-400">{formatTimestamp(node.timestamp)}</span>
+        <div
+          className="flex-1 h-1.5 rounded overflow-hidden"
+          style={{ background: 'var(--color-border)' }}
+        >
+          <div
+            className="h-full rounded"
+            style={{
+              width: `${node.percent || 0}%`,
+              background: 'var(--color-accent)',
+            }}
+          />
+        </div>
+        <span
+          style={{
+            fontFamily: 'var(--font-sans)',
+            fontSize: '0.7rem',
+            color: 'var(--color-accent)',
+          }}
+        >
+          {node.percent}%
+        </span>
       </div>
-      <div className="text-sm text-cyan-600">
-        Progress: {node.percent}% {node.message}
-      </div>
+
+      {/* Message */}
+      {node.message && (
+        <div
+          style={{
+            fontFamily: 'var(--font-serif)',
+            fontSize: '0.75rem',
+            color: 'var(--color-text-secondary)',
+          }}
+        >
+          {node.message}
+        </div>
+      )}
     </div>
   )
 }
 
 function ToolResultNode({ node }: TimelineNodeProps) {
   return (
-    <div className="p-2">
-      <div className="flex items-center gap-2 mb-1">
-        <span className="text-xs text-gray-400">{formatTimestamp(node.timestamp)}</span>
+    <div className="px-3 py-2">
+      {/* Status indicators */}
+      <div className="flex items-center gap-2 mb-1.5">
+        {node.synthetic && (
+          <span
+            style={{
+              fontFamily: 'var(--font-sans)',
+              fontSize: '0.65rem',
+              background: '#f5e8e8',
+              color: 'var(--color-error)',
+              padding: '0.1rem 0.3rem',
+              borderRadius: 'var(--radius-sm)',
+            }}
+          >
+            synthetic
+          </span>
+        )}
+        {node.cancelReason && (
+          <span
+            style={{
+              fontFamily: 'var(--font-sans)',
+              fontSize: '0.65rem',
+              color: 'var(--color-error)',
+            }}
+          >
+            {node.cancelReason}
+          </span>
+        )}
       </div>
-      {node.synthetic && (
-        <div className="text-xs text-orange-500 mb-1">Synthetic result</div>
+
+      {/* Result content */}
+      {node.result && (
+        <div
+          className="text-sm max-h-20 overflow-auto"
+          style={{
+            fontFamily: 'var(--font-serif)',
+            color: 'var(--color-text)',
+          }}
+        >
+          {node.result}
+        </div>
       )}
-      {node.cancelReason && (
-        <div className="text-xs text-red-500 mb-1">Cancel: {node.cancelReason}</div>
-      )}
-      <div className="text-sm text-gray-700 whitespace-pre-wrap max-h-32 overflow-auto">
-        {node.result}
-      </div>
     </div>
   )
 }
 
 function EventNode({ node }: TimelineNodeProps) {
   return (
-    <div className="p-2">
+    <div className="px-3 py-2">
+      {/* Event type */}
       <div className="flex items-center gap-2 mb-1">
-        <span className="font-medium text-orange-600">{node.eventType}</span>
-        <span className="text-xs text-gray-400">{formatTimestamp(node.timestamp)}</span>
+        <span
+          style={{
+            fontFamily: 'var(--font-sans)',
+            fontWeight: 500,
+            fontSize: '0.8rem',
+            color: 'var(--color-warning)',
+          }}
+        >
+          {node.eventType}
+        </span>
+        <span
+          style={{
+            fontFamily: 'var(--font-sans)',
+            fontSize: '0.65rem',
+            color: 'var(--color-text-muted)',
+          }}
+        >
+          {formatTimestamp(node.timestamp)}
+        </span>
       </div>
-      <div className="text-xs text-gray-500">
-        {JSON.stringify(node.eventData)}
-      </div>
+
+      {/* Event data */}
+      {node.eventData && (
+        <div
+          className="text-xs max-h-16 overflow-auto rounded p-1.5"
+          style={{
+            fontFamily: 'var(--font-serif)',
+            background: 'var(--color-bg-subtle)',
+            color: 'var(--color-text-secondary)',
+          }}
+        >
+          {JSON.stringify(node.eventData, null, 2)}
+        </div>
+      )}
     </div>
   )
 }
 
 function CompactionNode({ node }: TimelineNodeProps) {
   return (
-    <div className="p-2">
+    <div className="px-3 py-2">
+      {/* Strategy */}
       <div className="flex items-center gap-2 mb-1">
-        <span className="font-medium text-gray-600">{node.strategy}</span>
-        <span className="text-xs text-gray-400">{formatTimestamp(node.timestamp)}</span>
+        <span
+          style={{
+            fontFamily: 'var(--font-sans)',
+            fontWeight: 500,
+            fontSize: '0.8rem',
+            color: 'var(--color-text-secondary)',
+          }}
+        >
+          {node.strategy}
+        </span>
       </div>
-      <div className="text-xs text-gray-500">
-        Tokens: {node.beforeTokens} {'->'} {node.afterTokens}
+
+      {/* Token reduction */}
+      <div
+        style={{
+          fontFamily: 'var(--font-sans)',
+          fontSize: '0.7rem',
+          color: 'var(--color-text-muted)',
+        }}
+      >
+        {node.beforeTokens} → {node.afterTokens}
+        {node.beforeTokens && node.afterTokens && (
+          <span className="ml-2" style={{ color: 'var(--color-success)' }}>
+            ({Math.round((1 - node.afterTokens / node.beforeTokens) * 100)}% saved)
+          </span>
+        )}
       </div>
-      <div className="text-xs text-gray-400">
-        Compacted: {node.compactedMessageIds?.length} messages
-      </div>
+
+      {/* Compacted messages */}
+      {node.compactedMessageIds?.length && (
+        <div
+          style={{
+            fontFamily: 'var(--font-sans)',
+            fontSize: '0.65rem',
+            color: 'var(--color-text-muted)',
+          }}
+        >
+          {node.compactedMessageIds.length} messages compacted
+        </div>
+      )}
     </div>
   )
 }
 
-function TimelineNode({ node }: TimelineNodeProps) {
+function TimelineNode({ node, index }: TimelineNodeProps) {
   const components: Record<TrajectoryNodeType, React.FC<TimelineNodeProps>> = {
     MESSAGE: MessageNode,
     LLM_ATTEMPT: LlmAttemptNode,
@@ -156,13 +395,37 @@ function TimelineNode({ node }: TimelineNodeProps) {
     COMPACTION: CompactionNode,
   }
   const Component = components[node.nodeType]
+
   return (
-    <div data-testid={`timeline-node-${node.nodeId}`} className="border-b border-gray-100">
-      <div className="flex items-center gap-2 px-2 py-1 bg-gray-50">
+    <div
+      data-testid={`timeline-node-${node.nodeId}`}
+      className="animate-slide-up"
+      style={{
+        borderBottom: '1px solid var(--color-border-subtle)',
+        animationDelay: `${Math.min(index * 30, 500)}ms`,
+        opacity: 0,
+        animationFillMode: 'forwards',
+      }}
+    >
+      {/* Node header */}
+      <div
+        className="flex items-center gap-2 px-3 py-1.5"
+        style={{ background: 'var(--color-bg-subtle)' }}
+      >
         <NodeTypeBadge nodeType={node.nodeType} />
-        <span className="font-mono text-xs text-gray-500">{node.nodeId}</span>
+        <span
+          style={{
+            fontFamily: 'var(--font-sans)',
+            fontSize: '0.65rem',
+            color: 'var(--color-text-muted)',
+          }}
+        >
+          {node.nodeId}
+        </span>
       </div>
-      <Component node={node} />
+
+      {/* Node content */}
+      <Component node={node} index={index} />
     </div>
   )
 }
@@ -175,29 +438,68 @@ interface TimelinePanelProps {
 
 export function TimelinePanel({ nodes, loading, error }: TimelinePanelProps) {
   return (
-    <div className="h-full flex flex-col">
-      {/* Header */}
-      <div className="p-2 border-b border-gray-200">
-        <span className="text-sm font-medium text-gray-700">
-          Timeline ({nodes.length} nodes)
-        </span>
-      </div>
-
+    <Panel
+      title="Timeline"
+      className="h-full flex flex-col overflow-hidden"
+      actions={
+        nodes.length > 0 && (
+          <span
+            style={{
+              fontFamily: 'var(--font-sans)',
+              fontSize: '0.7rem',
+              color: 'var(--color-text-muted)',
+            }}
+          >
+            {nodes.length} nodes
+          </span>
+        )
+      }
+    >
       {/* Content */}
       <div className="flex-1 overflow-auto">
         {loading && (
-          <div className="p-4 text-center text-gray-500">Loading...</div>
+          <div
+            className="py-12 text-center"
+            style={{
+              fontFamily: 'var(--font-serif)',
+              fontStyle: 'italic',
+              color: 'var(--color-text-muted)',
+            }}
+          >
+            <span className="animate-pulse-soft">Loading trajectory...</span>
+          </div>
         )}
+
         {error && (
-          <div className="p-4 text-center text-red-500">{error}</div>
+          <div
+            className="py-8 text-center px-4"
+            style={{
+              fontFamily: 'var(--font-sans)',
+              color: 'var(--color-error)',
+            }}
+          >
+            {error}
+          </div>
         )}
+
         {!loading && !error && nodes.length === 0 && (
-          <div className="p-4 text-center text-gray-500">No trajectory data</div>
+          <div
+            className="py-12 text-center"
+            style={{
+              fontFamily: 'var(--font-serif)',
+              fontStyle: 'italic',
+              color: 'var(--color-text-muted)',
+            }}
+          >
+            <p>No trajectory data</p>
+            <p className="text-sm mt-1">Select a run to view timeline</p>
+          </div>
         )}
-        {!loading && !error && nodes.map(node => (
-          <TimelineNode key={node.nodeId} node={node} />
+
+        {!loading && !error && nodes.map((node, idx) => (
+          <TimelineNode key={node.nodeId} node={node} index={idx} />
         ))}
       </div>
-    </div>
+    </Panel>
   )
 }

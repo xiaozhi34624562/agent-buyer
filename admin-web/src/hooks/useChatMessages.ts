@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import type { SseEvent, ToolCard } from '../types'
+import type { SseEvent, ToolCard, TrajectoryNode } from '../types'
 import { readSseStream } from '../api/sseParser'
 
 export interface ChatMessage {
@@ -19,6 +19,7 @@ export interface UseChatMessagesResult {
   sendConfirmation: (runId: string, confirmed: boolean) => Promise<void>
   addAssistantMessage: (content: string, toolCards?: ChatMessage['toolCards']) => void
   clearMessages: () => void
+  setMessagesFromTrajectory: (nodes: TrajectoryNode[]) => void
 }
 
 export function useChatMessages(options: UseChatMessagesOptions): UseChatMessagesResult {
@@ -31,6 +32,23 @@ export function useChatMessages(options: UseChatMessagesOptions): UseChatMessage
 
   const clearMessages = useCallback(() => {
     setMessages([])
+  }, [])
+
+  // Extract chat messages from trajectory nodes
+  const setMessagesFromTrajectory = useCallback((nodes: TrajectoryNode[]) => {
+    const chatMessages: ChatMessage[] = []
+    for (const node of nodes) {
+      if (node.nodeType === 'MESSAGE' && node.role && node.content) {
+        // Only include user and assistant messages (not system/tool)
+        if (node.role === 'user' || node.role === 'assistant') {
+          chatMessages.push({
+            role: node.role,
+            content: node.content,
+          })
+        }
+      }
+    }
+    setMessages(chatMessages)
   }, [])
 
   const sendMessage = useCallback(async (runId: string, content: string) => {
@@ -76,5 +94,6 @@ export function useChatMessages(options: UseChatMessagesOptions): UseChatMessage
     sendConfirmation,
     addAssistantMessage,
     clearMessages,
+    setMessagesFromTrajectory,
   }
 }

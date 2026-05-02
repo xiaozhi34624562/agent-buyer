@@ -59,6 +59,8 @@ export interface TrajectoryNode {
   model?: string
   inputTokens?: number
   outputTokens?: number
+  totalTokens?: number
+  finishReason?: string
   toolName?: string
   args?: Record<string, unknown>
   result?: string

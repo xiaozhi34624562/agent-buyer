@@ -18,6 +18,7 @@ export interface UseChatStreamResult {
   startStream: (runId: string) => void
   stopStream: () => void
   resetState: () => void
+  setRunStatus: (runId: string, status: string) => void
 }
 
 const initialState: ChatStreamState = {
@@ -54,6 +55,16 @@ export function useChatStream(): UseChatStreamResult {
   const resetState = useCallback(() => {
     toolCardsRef.current.clear()
     setState(initialState)
+  }, [])
+
+  const setRunStatus = useCallback((runId: string, status: string) => {
+    toolCardsRef.current.clear()
+    setState({
+      ...initialState,
+      runId,
+      runStatus: status,
+      isStreaming: false,
+    })
   }, [])
 
   const processEvent = useCallback((event: SseEvent) => {
@@ -154,5 +165,6 @@ export function useChatStream(): UseChatStreamResult {
     startStream,
     stopStream,
     resetState,
+    setRunStatus,
   }
 }

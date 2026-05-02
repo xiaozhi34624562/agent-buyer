@@ -15,6 +15,12 @@ describe('ChatPanel', () => {
     onConfirm: vi.fn(),
     onReject: vi.fn(),
     onStopStream: vi.fn(),
+    // Run control props
+    selectedRunId: null,
+    onNewChat: vi.fn(),
+    onRefreshRun: vi.fn(),
+    onInterrupt: vi.fn(),
+    onAbort: vi.fn(),
   }
 
   beforeEach(() => {
@@ -28,7 +34,7 @@ describe('ChatPanel', () => {
 
   it('should display paused placeholder when PAUSED + user_input', () => {
     render(<ChatPanel {...defaultProps} runStatus="PAUSED" nextActionRequired="user_input" />)
-    expect(screen.getByPlaceholderText('补充订单号、说明或下一步指令...')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('补充说明后继续...')).toBeInTheDocument()
   })
 
   it('should call onSendMessage when Send clicked', () => {
@@ -37,7 +43,7 @@ describe('ChatPanel', () => {
 
     const input = screen.getByPlaceholderText('输入消息...')
     fireEvent.change(input, { target: { value: '取消我昨天的订单' } })
-    fireEvent.click(screen.getByText('Send'))
+    fireEvent.click(screen.getByText('发送'))
 
     expect(onSendMessage).toHaveBeenCalledWith('取消我昨天的订单')
   })
@@ -63,15 +69,15 @@ describe('ChatPanel', () => {
 
   it('should show Stop button when streaming', () => {
     render(<ChatPanel {...defaultProps} isStreaming={true} />)
-    expect(screen.getByText('Stop')).toBeInTheDocument()
-    expect(screen.queryByText('Send')).not.toBeInTheDocument()
+    expect(screen.getByText('停止')).toBeInTheDocument()
+    expect(screen.queryByText('发送')).not.toBeInTheDocument()
   })
 
   it('should call onStopStream when Stop clicked', () => {
     const onStopStream = vi.fn()
     render(<ChatPanel {...defaultProps} isStreaming={true} onStopStream={onStopStream} />)
 
-    fireEvent.click(screen.getByText('Stop'))
+    fireEvent.click(screen.getByText('停止'))
     expect(onStopStream).toHaveBeenCalled()
   })
 
@@ -108,27 +114,27 @@ describe('ChatPanel', () => {
 
   it('should display WAITING_USER_CONFIRMATION buttons', () => {
     render(<ChatPanel {...defaultProps} runStatus="WAITING_USER_CONFIRMATION" />)
-    expect(screen.getByText('确认继续执行')).toBeInTheDocument()
-    expect(screen.getByText('放弃本次操作')).toBeInTheDocument()
+    expect(screen.getByText('确认继续')).toBeInTheDocument()
+    expect(screen.getByText('放弃操作')).toBeInTheDocument()
   })
 
   it('should call onConfirm when Confirm clicked', () => {
     const onConfirm = vi.fn()
     render(<ChatPanel {...defaultProps} runStatus="WAITING_USER_CONFIRMATION" onConfirm={onConfirm} />)
-    fireEvent.click(screen.getByText('确认继续执行'))
+    fireEvent.click(screen.getByText('确认继续'))
     expect(onConfirm).toHaveBeenCalled()
   })
 
   it('should call onReject when Reject clicked', () => {
     const onReject = vi.fn()
     render(<ChatPanel {...defaultProps} runStatus="WAITING_USER_CONFIRMATION" onReject={onReject} />)
-    fireEvent.click(screen.getByText('放弃本次操作'))
+    fireEvent.click(screen.getByText('放弃操作'))
     expect(onReject).toHaveBeenCalled()
   })
 
   it('should not show HITL buttons when streaming', () => {
     render(<ChatPanel {...defaultProps} runStatus="WAITING_USER_CONFIRMATION" isStreaming={true} />)
-    expect(screen.queryByText('确认继续执行')).not.toBeInTheDocument()
+    expect(screen.queryByText('确认继续')).not.toBeInTheDocument()
   })
 
   it('should clear input after sending', () => {
@@ -145,7 +151,7 @@ describe('ChatPanel', () => {
     const onSendMessage = vi.fn()
     render(<ChatPanel {...defaultProps} onSendMessage={onSendMessage} />)
 
-    fireEvent.click(screen.getByText('Send'))
+    fireEvent.click(screen.getByText('发送'))
     expect(onSendMessage).not.toHaveBeenCalled()
   })
 
