@@ -4,6 +4,7 @@ import com.ai.agent.config.AgentProperties;
 import com.ai.agent.llm.model.LlmMessage;
 import com.ai.agent.llm.model.LlmStreamResult;
 import com.ai.agent.llm.model.ToolCallMessage;
+import com.ai.agent.security.SensitivePayloadSanitizer;
 import com.ai.agent.tool.core.Tool;
 import com.ai.agent.tool.core.ToolUseContext;
 import com.ai.agent.tool.core.ToolValidation;
@@ -53,6 +54,7 @@ public final class ToolCallCoordinator {
     private final ToolResultCloser toolResultCloser;
     private final PendingConfirmToolStore pendingConfirmToolStore;
     private final ObjectMapper objectMapper;
+    private final SensitivePayloadSanitizer sanitizer;
 
     public ToolCallCoordinator(
             AgentProperties properties,
@@ -64,7 +66,8 @@ public final class ToolCallCoordinator {
             TrajectoryReader trajectoryReader,
             ToolResultCloser toolResultCloser,
             PendingConfirmToolStore pendingConfirmToolStore,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            SensitivePayloadSanitizer sanitizer
     ) {
         this.properties = properties;
         this.toolRegistry = toolRegistry;
@@ -76,6 +79,7 @@ public final class ToolCallCoordinator {
         this.toolResultCloser = toolResultCloser;
         this.pendingConfirmToolStore = pendingConfirmToolStore;
         this.objectMapper = objectMapper;
+        this.sanitizer = sanitizer;
     }
 
     public ToolStepResult processToolCalls(
@@ -480,7 +484,7 @@ public final class ToolCallCoordinator {
         String newToolUseId = Ids.newId("call");
         long seq = trajectoryReader.findToolCallsByRun(runId).size() + 1L;
 
-        ToolCall call = new ToolCall(
+        ToolCall executionCall = new ToolCall(
                 runId,
                 newToolCallId,
                 seq,
@@ -494,6 +498,20 @@ public final class ToolCallCoordinator {
                 null,
                 tool.schema().timeout().toMillis()
         );
+        ToolCall traceCall = new ToolCall(
+                executionCall.runId(),
+                executionCall.toolCallId(),
+                executionCall.seq(),
+                executionCall.toolUseId(),
+                executionCall.rawToolName(),
+                executionCall.toolName(),
+                sanitizer.removeConfirmTokenFromJson(argsJson),
+                executionCall.isConcurrent(),
+                executionCall.idempotent(),
+                executionCall.precheckFailed(),
+                executionCall.precheckErrorJson(),
+                executionCall.timeoutMs()
+        );
 
         // Persist tool call to trajectory (required for foreign key constraint)
         // Create a system message to link the tool call
@@ -501,22 +519,22 @@ public final class ToolCallCoordinator {
                 runId,
                 LlmMessage.user(Ids.newId("msg"), "用户已确认执行操作。")
         );
-        trajectoryStore.writeToolCall(messageId, call);
+        trajectoryStore.writeToolCall(messageId, traceCall);
 
         // Register tool call in Redis for execution tracking
-        redisToolStore.ingestWaiting(runId, call);
+        redisToolStore.ingestWaiting(runId, executionCall);
 
         // Emit tool_use event
-        sink.onToolUse(new ToolUseEvent(runId, newToolUseId, tool.schema().name(), argsJson));
+        sink.onToolUse(new ToolUseEvent(runId, newToolUseId, tool.schema().name(), traceCall.argsJson()));
 
         // Execute tool
-        toolRuntime.onToolUse(runId, call);
+        toolRuntime.onToolUse(runId, executionCall);
 
         // Wait for result using the tool's timeout
         try {
             List<ToolTerminal> terminals = toolResultWaiter.awaitResults(
                     runId,
-                    List.of(call),
+                    List.of(executionCall),
                     tool.schema().timeout()
             );
 
@@ -527,7 +545,7 @@ public final class ToolCallCoordinator {
             ToolTerminal terminal = terminals.get(0);
 
             // Close the result (writes to trajectory)
-            toolResultCloser.closeTerminal(runId, call, terminal, sink);
+            toolResultCloser.closeTerminal(runId, traceCall, terminal, sink);
 
             return terminal;
         } catch (ToolResultTimeoutException e) {
@@ -539,7 +557,7 @@ public final class ToolCallCoordinator {
                     CancelReason.TOOL_TIMEOUT,
                     true
             );
-            toolResultCloser.closeTerminal(runId, call, timeoutTerminal, sink);
+            toolResultCloser.closeTerminal(runId, traceCall, timeoutTerminal, sink);
             return timeoutTerminal;
         }
     }

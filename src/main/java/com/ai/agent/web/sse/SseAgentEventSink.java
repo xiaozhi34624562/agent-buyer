@@ -1,5 +1,6 @@
 package com.ai.agent.web.sse;
 
+import com.ai.agent.security.SensitivePayloadSanitizer;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
@@ -12,16 +13,19 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class SseAgentEventSink implements AgentEventSink, AutoCloseable {
     private final SseEmitter emitter;
     private final SseMetrics metrics;
+    private final SensitivePayloadSanitizer sanitizer;
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private ScheduledFuture<?> pingTask;
 
     public SseAgentEventSink(
             SseEmitter emitter,
             ScheduledExecutorService scheduler,
-            SseMetrics metrics
+            SseMetrics metrics,
+            SensitivePayloadSanitizer sanitizer
     ) {
         this.emitter = emitter;
         this.metrics = metrics;
+        this.sanitizer = sanitizer;
         metrics.opened();
         this.pingTask = scheduler.scheduleAtFixedRate(this::sendPing, 15, 15, TimeUnit.SECONDS);
         emitter.onCompletion(() -> close("completion"));
@@ -68,7 +72,7 @@ public final class SseAgentEventSink implements AgentEventSink, AutoCloseable {
                 if (closed.get()) {
                     return;
                 }
-                emitter.send(SseEmitter.event().name(eventName).data(payload));
+                emitter.send(SseEmitter.event().name(eventName).data(sanitizer.sanitizeForSse(payload)));
             }
             metrics.eventSent(eventName);
         } catch (IOException e) {

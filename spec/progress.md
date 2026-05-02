@@ -1367,3 +1367,56 @@ Console 不做：
 - latest real LLM E2E：按用户要求“前六次都通过就停止”
   - 6/6 通过，未继续追加到 10 次。
   - artifacts 根目录：`/tmp/agent-buyer-real-llm-e2e-6x-20260502-154645`。
+
+## 2026-05-02 Review Hardening：Admin Token / ConfirmToken Redaction / Redis Lua
+
+### 修复内容
+
+- `AdminAccessGuard`：
+  - token 校验从 `String.equals` 改为 SHA-256 digest 后使用 `MessageDigest.isEqual` 比较，避免可见的早停比较路径。
+  - 保留 local/demo profile 的 tokenless 开发体验，非 local/demo 仍强制 token。
+- 后端 confirmToken 脱敏：
+  - 新增 `SensitivePayloadSanitizer`，统一处理 `confirmToken`、`ct_*`、`sk-*`、手机号、邮箱等敏感内容。
+  - `SseAgentEventSink` 在发送 SSE 前脱敏 payload。
+  - `AgentEventRecorder` 在异步写 `agent_event` / `agent_tool_progress` 前脱敏。
+  - `ToolResultCloser` 在写 `agent_tool_result_trace` 与 `TOOL` message 前脱敏 tool terminal。
+  - 用户确认后的内部执行仍使用带 `confirmToken` 的 execution call；写入 trajectory 和 SSE 的 trace call 会移除 `confirmToken`。
+- Redis Lua 外置：
+  - 新增 `RedisLuaScripts`，通过 classpath resource 加载 `DefaultRedisScript`。
+  - 外置脚本到 `src/main/resources/redis/**`：
+    - tool：ingest / schedule / complete / reap-expired-leases / cancel-waiting / cancel-active
+    - budget：reserve-run-llm-call
+    - continuation：release-if-token-matches
+    - todo：replace-plan
+    - subagent：reserve-child / release-child
+  - Java 侧复用静态 `DefaultRedisScript`，避免每次调用重新构造脚本对象；Spring Data Redis 会使用脚本 SHA1/EVALSHA 执行路径并在 miss 时 fallback。
+- Summary compact 可观测性：
+  - `ContextViewBuilder` 对 `SUMMARY_COMPACT` 不再靠 record equality 推断 compacted ids，而是读取 summary message extras 中的 `compactedMessageIds`，避免前置 LargeResultSpiller / MicroCompactor 改 content 后影响 summary 记录。
+
+### 新增/更新测试
+
+- `SensitivePayloadSanitizerTest`
+  - 覆盖 SSE payload 中嵌套 `confirmToken` 脱敏。
+  - 覆盖执行参数写 trajectory 前移除 `confirmToken`。
+- `AgentEventRecorderTest`
+  - 覆盖 `agent_event` 与 `agent_tool_progress` 入库前脱敏。
+- `ToolResultCloserTest`
+  - 覆盖 tool result trace 与 `TOOL` message 入库前脱敏。
+- Redis 相关 integration tests 复用原测试集验证外置 Lua 行为不变。
+
+### 验证结果
+
+- targeted：`MYSQL_PASSWORD=*** mvn -Dtest=com.ai.agent.web.admin.service.AdminAccessGuardTest,com.ai.agent.security.SensitivePayloadSanitizerTest,com.ai.agent.web.sse.AgentEventRecorderTest,com.ai.agent.tool.runtime.ToolResultCloserTest,com.ai.agent.loop.ToolCallCoordinatorMalformedArgsTest,com.ai.agent.application.ContinuationLockServiceTest,com.ai.agent.tool.runtime.redis.RedisToolStoreIntegrationTest,com.ai.agent.subagent.runtime.RedisChildRunRegistryIntegrationTest,com.ai.agent.todo.runtime.TodoStoreTest,com.ai.agent.web.controller.AgentControllerAccessTest test`
+  - 63 tests，0 failures，0 errors，BUILD SUCCESS。
+- full backend clean：`MYSQL_PASSWORD=*** mvn clean test`
+  - 287 tests，0 failures，0 errors，BUILD SUCCESS。
+- real LLM E2E：`MYSQL_PASSWORD=*** DEEPSEEK_API_KEY=*** QWEN_API_KEY=*** ./scripts/real-llm-e2e.sh`
+  - 6/6 case 通过。
+  - 覆盖：订单取消 dry-run + confirm、ToDo、SubAgent、interrupt -> PAUSED、slash skill + 三种 context compact、DeepSeek pre-stream failure -> Qwen fallback。
+  - artifacts：`/tmp/agent-buyer-real-llm-e2e/20260502-161531`。
+
+### 踩坑记录
+
+- 将用户确认后的 `ToolCall` 拆成 execution call 和 trace call 后，`toolRuntime.onToolUse` 一处变量名仍引用旧 `call`，第一次编译失败；修复为使用带 token 的 `executionCall`。
+- 后端脱敏不能只做 SSE，也不能只做 admin query DTO。真正稳定的边界是：SSE 发送、异步 event/progress 入库、tool result trace / TOOL message 入库都各自做一次 defense-in-depth。
+- Lua 外置时不能只迁移 `LuaRedisToolStore`。预算、continuation lock、todo、subagent slot 也有内嵌 Lua；如果只迁移一部分，维护入口仍然分裂。

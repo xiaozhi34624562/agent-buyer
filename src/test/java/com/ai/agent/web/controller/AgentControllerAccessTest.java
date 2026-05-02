@@ -22,6 +22,7 @@ import com.ai.agent.loop.AgentLoop;
 import com.ai.agent.loop.AgentLoopTestFactory;
 import com.ai.agent.loop.DefaultAgentLoop;
 import com.ai.agent.persistence.entity.AgentRunEntity;
+import com.ai.agent.security.SensitivePayloadSanitizer;
 import com.ai.agent.subagent.model.ChildReleaseReason;
 import com.ai.agent.subagent.model.ChildRunRef;
 import com.ai.agent.subagent.model.ParentLinkStatus;
@@ -50,6 +51,7 @@ import com.ai.agent.trajectory.query.TrajectoryQueryService;
 import com.ai.agent.web.dto.AgentRunRequest;
 import com.ai.agent.web.dto.AgentRunResult;
 import com.ai.agent.web.dto.UserMessage;
+import com.ai.agent.web.sse.AgentEventRecorder;
 import com.ai.agent.web.sse.AgentEventSink;
 import com.ai.agent.web.sse.ErrorEvent;
 import com.ai.agent.web.sse.FinalEvent;
@@ -91,6 +93,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.mockito.Mockito.mock;
 
 class AgentControllerAccessTest {
     MockMvc mockMvc;
@@ -107,6 +110,7 @@ class AgentControllerAccessTest {
         agentExecutor = new CountingExecutorService();
         redisToolStore = new FakeRedisToolStore();
         redisTemplate = new FakeStringRedisTemplate();
+        SensitivePayloadSanitizer sanitizer = new SensitivePayloadSanitizer(new ObjectMapper());
         ContinuationLockService continuationLockService = new ContinuationLockService(
                 new RedisKeys(new AgentProperties()),
                 redisTemplate
@@ -124,7 +128,7 @@ class AgentControllerAccessTest {
                 runAccessManager,
                 continuationLockService,
                 redisToolStore,
-                new ToolResultCloser(trajectoryStore, trajectoryStore, TestObjectProvider.empty()),
+                new ToolResultCloser(trajectoryStore, trajectoryStore, TestObjectProvider.empty(), sanitizer),
                 new TrajectoryQueryService(trajectoryStore, new ObjectMapper()),
                 interruptService(runAccessManager)
         );
@@ -133,7 +137,8 @@ class AgentControllerAccessTest {
                 agentExecutor,
                 new NoopScheduledExecutorService(),
                 new SseMetrics(new SimpleMeterRegistry()),
-                null
+                mock(AgentEventRecorder.class),
+                sanitizer
         );
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
@@ -144,7 +149,7 @@ class AgentControllerAccessTest {
                 runAccessManager,
                 new RunStateMachine(trajectoryStore),
                 redisToolStore,
-                new ToolResultCloser(trajectoryStore, trajectoryStore, TestObjectProvider.empty()),
+                new ToolResultCloser(trajectoryStore, trajectoryStore, TestObjectProvider.empty(), new SensitivePayloadSanitizer(new ObjectMapper())),
                 new RunEventSinkRegistry(),
                 new EmptyChildRunRegistry(),
                 trajectoryStore

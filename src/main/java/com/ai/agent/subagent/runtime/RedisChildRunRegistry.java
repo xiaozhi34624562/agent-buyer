@@ -1,6 +1,7 @@
 package com.ai.agent.subagent.runtime;
 
 import com.ai.agent.config.AgentProperties;
+import com.ai.agent.redis.RedisLuaScripts;
 import com.ai.agent.subagent.model.ChildReleaseReason;
 import com.ai.agent.subagent.model.ChildReserveRejectReason;
 import com.ai.agent.subagent.model.ChildRunRef;
@@ -22,71 +23,11 @@ import org.springframework.stereotype.Component;
 public final class RedisChildRunRegistry implements ChildRunRegistry {
     private static final int CHILD_KEY_TTL_SECONDS = 7 * 24 * 60 * 60;
 
-    private static final String RESERVE_SCRIPT = """
-            local childField = 'child:' .. ARGV[1]
-            local toolCallField = 'tool_call:' .. ARGV[3]
-            local existingChildId = redis.call('HGET', KEYS[1], toolCallField)
-            if existingChildId then
-              redis.call('EXPIRE', KEYS[1], tonumber(ARGV[10]))
-              return {1, existingChildId, '', 1}
-            end
-            local existing = redis.call('HGET', KEYS[1], childField)
-            if existing then
-              redis.call('EXPIRE', KEYS[1], tonumber(ARGV[10]))
-              return {1, ARGV[1], '', 1}
-            end
-
-            local spawned = tonumber(redis.call('HGET', KEYS[1], 'spawned_total') or '0')
-            local inFlight = tonumber(redis.call('HGET', KEYS[1], 'in_flight') or '0')
-            local turnField = 'turn:' .. ARGV[5] .. ':spawn_attempts'
-            local turnSpawned = tonumber(redis.call('HGET', KEYS[1], turnField) or '0')
-
-            if turnSpawned >= tonumber(ARGV[8]) then
-              redis.call('EXPIRE', KEYS[1], tonumber(ARGV[10]))
-              return {0, ARGV[1], 'SPAWN_BUDGET_PER_USER_TURN', 0}
-            end
-            if spawned >= tonumber(ARGV[6]) then
-              redis.call('EXPIRE', KEYS[1], tonumber(ARGV[10]))
-              return {0, ARGV[1], 'MAX_SPAWN_PER_RUN', 0}
-            end
-            if inFlight >= tonumber(ARGV[7]) then
-              redis.call('EXPIRE', KEYS[1], tonumber(ARGV[10]))
-              return {0, ARGV[1], 'MAX_CONCURRENT_PER_RUN', 0}
-            end
-
-            redis.call('HINCRBY', KEYS[1], 'spawned_total', 1)
-            redis.call('HINCRBY', KEYS[1], 'in_flight', 1)
-            redis.call('HINCRBY', KEYS[1], turnField, 1)
-            redis.call('HSET', KEYS[1], childField, ARGV[9])
-            redis.call('HSET', KEYS[1], toolCallField, ARGV[1])
-            redis.call('EXPIRE', KEYS[1], tonumber(ARGV[10]))
-            return {1, ARGV[1], '', 0}
-            """;
-
-    private static final String RELEASE_SCRIPT = """
-            local childField = 'child:' .. ARGV[1]
-            local raw = redis.call('HGET', KEYS[1], childField)
-            if not raw then
-              redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
-              return 0
-            end
-            local child = cjson.decode(raw)
-            if child['state'] ~= 'IN_FLIGHT' then
-              redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
-              return 0
-            end
-            local inFlight = tonumber(redis.call('HGET', KEYS[1], 'in_flight') or '0')
-            if inFlight > 0 then
-              redis.call('HINCRBY', KEYS[1], 'in_flight', -1)
-            end
-            child['state'] = 'RELEASED'
-            child['releaseReason'] = ARGV[2]
-            child['parentLinkStatus'] = ARGV[4]
-            child['releasedAtEpochMs'] = tonumber(ARGV[5])
-            redis.call('HSET', KEYS[1], childField, cjson.encode(child))
-            redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
-            return 1
-            """;
+    @SuppressWarnings("rawtypes")
+    private static final DefaultRedisScript<List> RESERVE_SCRIPT =
+            RedisLuaScripts.load("redis/subagent/reserve-child.lua", List.class);
+    private static final DefaultRedisScript<Long> RELEASE_SCRIPT =
+            RedisLuaScripts.load("redis/subagent/release-child.lua", Long.class);
 
     private final AgentProperties properties;
     private final RedisKeys keys;
@@ -108,7 +49,7 @@ public final class RedisChildRunRegistry implements ChildRunRegistry {
     @Override
     public ReserveChildResult reserve(ReserveChildCommand command) {
         List<Object> result = redisTemplate.execute(
-                new DefaultRedisScript<>(RESERVE_SCRIPT, List.class),
+                RESERVE_SCRIPT,
                 List.of(keys.children(command.parentRunId())),
                 command.childRunId(),
                 command.parentRunId(),
@@ -148,7 +89,7 @@ public final class RedisChildRunRegistry implements ChildRunRegistry {
             ParentLinkStatus parentLinkStatus
     ) {
         Long result = redisTemplate.execute(
-                new DefaultRedisScript<>(RELEASE_SCRIPT, Long.class),
+                RELEASE_SCRIPT,
                 List.of(keys.children(parentRunId)),
                 childRunId,
                 reason.name(),

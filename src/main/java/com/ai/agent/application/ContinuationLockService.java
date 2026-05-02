@@ -1,5 +1,6 @@
 package com.ai.agent.application;
 
+import com.ai.agent.redis.RedisLuaScripts;
 import com.ai.agent.tool.runtime.redis.RedisKeys;
 import com.ai.agent.util.Ids;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -11,12 +12,8 @@ import java.util.List;
 
 @Component
 public final class ContinuationLockService {
-    private static final DefaultRedisScript<Long> RELEASE_IF_TOKEN_MATCHES = new DefaultRedisScript<>("""
-            if redis.call('get', KEYS[1]) == ARGV[1] then
-              return redis.call('del', KEYS[1])
-            end
-            return 0
-            """, Long.class);
+    private static final DefaultRedisScript<Long> RELEASE_IF_TOKEN_MATCHES =
+            RedisLuaScripts.load("redis/continuation/release-if-token-matches.lua", Long.class);
 
     private final RedisKeys redisKeys;
     private final StringRedisTemplate redisTemplate;

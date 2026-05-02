@@ -185,7 +185,9 @@ public final class ContextViewBuilder {
         if (before.equals(after)) {
             return after;
         }
-        List<String> compactedMessageIds = compactedMessageIds(before, after);
+        List<String> compactedMessageIds = SUMMARY_COMPACT.equals(strategy)
+                ? summaryCompactedMessageIds(after)
+                : compactedMessageIds(before, after);
         if (compactedMessageIds.isEmpty()) {
             return after;
         }
@@ -217,6 +219,25 @@ public final class ContextViewBuilder {
             }
         }
         return List.copyOf(ids);
+    }
+
+    private List<String> summaryCompactedMessageIds(List<LlmMessage> after) {
+        for (LlmMessage message : after) {
+            if (!Boolean.TRUE.equals(message.extras().get("compactSummary"))) {
+                continue;
+            }
+            Object rawIds = message.extras().get("compactedMessageIds");
+            if (rawIds instanceof List<?> values) {
+                List<String> ids = new ArrayList<>();
+                for (Object value : values) {
+                    if (value != null) {
+                        ids.add(value.toString());
+                    }
+                }
+                return List.copyOf(ids);
+            }
+        }
+        return List.of();
     }
 
     private int totalTokens(List<LlmMessage> messages) {

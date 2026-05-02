@@ -9,6 +9,7 @@ import com.ai.agent.llm.transcript.TranscriptPairValidator;
 import com.ai.agent.persistence.entity.AgentMessageEntity;
 import com.ai.agent.persistence.entity.AgentRunEntity;
 import com.ai.agent.persistence.entity.AgentToolResultTraceEntity;
+import com.ai.agent.security.SensitivePayloadSanitizer;
 import com.ai.agent.support.TestObjectProvider;
 import com.ai.agent.tool.model.CancelReason;
 import com.ai.agent.tool.model.ToolCall;
@@ -24,6 +25,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -32,7 +34,7 @@ class ToolResultCloserTest {
     @Test
     void syntheticCloseWritesToolResultAndToolMessageOnlyOnce() {
         FakeTrajectoryStore store = new FakeTrajectoryStore();
-        ToolResultCloser closer = new ToolResultCloser(store, store, TestObjectProvider.empty());
+        ToolResultCloser closer = new ToolResultCloser(store, store, TestObjectProvider.empty(), sanitizer());
         String runId = "run-close";
         ToolCall call = toolCall(runId);
         store.appendMessage(runId, LlmMessage.assistant(
@@ -65,7 +67,7 @@ class ToolResultCloserTest {
     void concurrentTerminalCloseWritesToolMessageOnlyOnce() throws Exception {
         FakeTrajectoryStore store = new FakeTrajectoryStore();
         store.snapshotDelayMillis = 25L;
-        ToolResultCloser closer = new ToolResultCloser(store, store, TestObjectProvider.empty());
+        ToolResultCloser closer = new ToolResultCloser(store, store, TestObjectProvider.empty(), sanitizer());
         String runId = "run-concurrent-close";
         ToolCall call = toolCall(runId);
         store.appendMessage(runId, LlmMessage.assistant(
@@ -93,6 +95,41 @@ class ToolResultCloserTest {
         assertThat(store.toolResults).hasSize(1);
         assertThat(store.messages.stream().filter(message -> message.role() == MessageRole.TOOL)).hasSize(1);
         new com.ai.agent.llm.transcript.TranscriptPairValidator().validate(store.messages);
+    }
+
+    @Test
+    void terminalCloseRedactsConfirmTokenBeforeWritingTrajectory() {
+        FakeTrajectoryStore store = new FakeTrajectoryStore();
+        ToolResultCloser closer = new ToolResultCloser(store, store, TestObjectProvider.empty(), sanitizer());
+        String runId = "run-redact";
+        ToolCall call = toolCall(runId);
+        store.appendMessage(runId, LlmMessage.assistant(
+                "msg-assistant",
+                "",
+                List.of(new ToolCallMessage(call.toolUseId(), call.toolName(), call.argsJson()))
+        ));
+
+        closer.closeTerminal(
+                runId,
+                call,
+                ToolTerminal.succeeded(call.toolCallId(), "{\"actionStatus\":\"PENDING_CONFIRM\",\"confirmToken\":\"ct_secret_token\",\"summary\":\"ok\"}"),
+                null
+        );
+
+        assertThat(store.toolResults.getFirst().getResultJson())
+                .doesNotContain("ct_secret_token")
+                .contains("[REDACTED]");
+        assertThat(store.messages.stream()
+                .filter(message -> message.role() == MessageRole.TOOL)
+                .findFirst()
+                .orElseThrow()
+                .content())
+                .doesNotContain("ct_secret_token")
+                .contains("[REDACTED]");
+    }
+
+    private static SensitivePayloadSanitizer sanitizer() {
+        return new SensitivePayloadSanitizer(new ObjectMapper());
     }
 
     private static ToolCall toolCall(String runId) {
@@ -230,6 +267,7 @@ class ToolResultCloserTest {
             entity.setRunId(runId);
             entity.setToolUseId(toolUseId);
             entity.setStatus(terminal.status().name());
+            entity.setResultJson(terminal.resultJson());
             entity.setErrorJson(terminal.errorJson());
             entity.setSynthetic(terminal.synthetic());
             toolResults.removeIf(existing -> existing.getToolCallId().equals(terminal.toolCallId()));

@@ -22,6 +22,7 @@ import com.ai.agent.llm.summary.DeterministicSummaryGenerator;
 import com.ai.agent.llm.summary.SummaryGenerationContext;
 import com.ai.agent.llm.summary.SummaryGenerator;
 import com.ai.agent.llm.transcript.TranscriptPairValidator;
+import com.ai.agent.security.SensitivePayloadSanitizer;
 import com.ai.agent.skill.command.SkillCommandResolver;
 import com.ai.agent.skill.core.SkillRegistry;
 import com.ai.agent.skill.path.SkillPathResolver;
@@ -483,6 +484,7 @@ class AgentTurnOrchestratorBudgetTest {
             ObjectMapper objectMapper,
             ToolRegistry toolRegistry
     ) {
+        SensitivePayloadSanitizer sanitizer = new SensitivePayloadSanitizer(objectMapper);
         return new AgentTurnOrchestrator(
                 properties,
                 contextViewBuilder,
@@ -501,9 +503,10 @@ class AgentTurnOrchestratorBudgetTest {
                         new ToolResultWaiter(new FakeRedisToolStore(), properties, TestObjectProvider.empty()),
                         trajectoryStore,
                         trajectoryStore,
-                        new ToolResultCloser(trajectoryStore, trajectoryStore, TestObjectProvider.empty()),
+                        new ToolResultCloser(trajectoryStore, trajectoryStore, TestObjectProvider.empty(), sanitizer),
                         mock(PendingConfirmToolStore.class),
-                        objectMapper
+                        objectMapper,
+                        sanitizer
                 ),
                 trajectoryStore,
                 trajectoryStore,

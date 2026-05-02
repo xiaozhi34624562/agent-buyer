@@ -17,6 +17,7 @@ import com.ai.agent.llm.provider.LlmProviderAdapter;
 import com.ai.agent.llm.provider.LlmProviderAdapterRegistry;
 import com.ai.agent.llm.summary.DeterministicSummaryGenerator;
 import com.ai.agent.llm.transcript.TranscriptPairValidator;
+import com.ai.agent.security.SensitivePayloadSanitizer;
 import com.ai.agent.support.TestObjectProvider;
 import com.ai.agent.tool.registry.ToolRegistry;
 import com.ai.agent.tool.runtime.RunEventSinkRegistry;
@@ -57,8 +58,9 @@ public final class AgentLoopTestFactory {
             RunAccessManager runAccessManager,
             ConfirmTokenStore confirmTokenStore,
             ObjectMapper objectMapper
-    ) {
+        ) {
         PendingConfirmToolStore pendingConfirmToolStore = mock(PendingConfirmToolStore.class);
+        SensitivePayloadSanitizer sanitizer = new SensitivePayloadSanitizer(objectMapper);
         AgentTurnOrchestrator turnOrchestrator = new AgentTurnOrchestrator(
                 properties,
                 new ContextViewBuilder(
@@ -87,9 +89,10 @@ public final class AgentLoopTestFactory {
                         toolResultWaiter,
                         trajectoryStore,
                         trajectoryReader,
-                        new ToolResultCloser(trajectoryStore, trajectoryReader, TestObjectProvider.empty()),
+                        new ToolResultCloser(trajectoryStore, trajectoryReader, TestObjectProvider.empty(), sanitizer),
                         pendingConfirmToolStore,
-                        objectMapper
+                        objectMapper,
+                        sanitizer
                 ),
                 trajectoryReader,
                 trajectoryStore,

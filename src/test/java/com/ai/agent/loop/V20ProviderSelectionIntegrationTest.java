@@ -27,6 +27,7 @@ import com.ai.agent.llm.provider.ProviderCallException;
 import com.ai.agent.llm.provider.ProviderErrorType;
 import com.ai.agent.llm.summary.DeterministicSummaryGenerator;
 import com.ai.agent.llm.transcript.TranscriptPairValidator;
+import com.ai.agent.security.SensitivePayloadSanitizer;
 import com.ai.agent.support.TestObjectProvider;
 import com.ai.agent.tool.model.CancelReason;
 import com.ai.agent.tool.model.StartedTool;
@@ -156,6 +157,7 @@ class V20ProviderSelectionIntegrationTest {
     ) {
         ToolRegistry toolRegistry = new ToolRegistry(List.of());
         RedisToolStore redisToolStore = new FakeRedisToolStore();
+        SensitivePayloadSanitizer sanitizer = new SensitivePayloadSanitizer(objectMapper);
         return new AgentTurnOrchestrator(
                 properties,
                 new ContextViewBuilder(
@@ -185,9 +187,10 @@ class V20ProviderSelectionIntegrationTest {
                         new ToolResultWaiter(redisToolStore, properties, TestObjectProvider.empty()),
                         trajectoryStore,
                         trajectoryStore,
-                        new ToolResultCloser(trajectoryStore, trajectoryStore, TestObjectProvider.empty()),
+                        new ToolResultCloser(trajectoryStore, trajectoryStore, TestObjectProvider.empty(), sanitizer),
                         mock(PendingConfirmToolStore.class),
-                        objectMapper
+                        objectMapper,
+                        sanitizer
                 ),
                 trajectoryStore,
                 trajectoryStore,

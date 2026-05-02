@@ -1,5 +1,6 @@
 package com.ai.agent.todo.runtime;
 
+import com.ai.agent.redis.RedisLuaScripts;
 import com.ai.agent.tool.runtime.redis.RedisKeys;
 import com.ai.agent.todo.model.TodoDraft;
 import com.ai.agent.todo.model.TodoStatus;
@@ -17,13 +18,8 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public class RedisTodoStore implements TodoStore {
-    private static final String REPLACE_PLAN_SCRIPT = """
-            redis.call('DEL', KEYS[1])
-            for i = 1, #ARGV, 2 do
-              redis.call('HSET', KEYS[1], ARGV[i], ARGV[i + 1])
-            end
-            return #ARGV / 2
-            """;
+    private static final DefaultRedisScript<Long> REPLACE_PLAN_SCRIPT =
+            RedisLuaScripts.load("redis/todo/replace-plan.lua", Long.class);
 
     private final RedisKeys keys;
     private final StringRedisTemplate redisTemplate;
@@ -125,7 +121,7 @@ public class RedisTodoStore implements TodoStore {
                 .flatMap(entry -> java.util.stream.Stream.of(entry.getKey(), entry.getValue()))
                 .toList();
         redisTemplate.execute(
-                new DefaultRedisScript<>(REPLACE_PLAN_SCRIPT, Long.class),
+                REPLACE_PLAN_SCRIPT,
                 List.of(key),
                 args.toArray(Object[]::new)
         );

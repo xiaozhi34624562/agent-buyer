@@ -4,6 +4,7 @@ import com.ai.agent.llm.model.LlmMessage;
 import com.ai.agent.llm.model.MessageRole;
 import com.ai.agent.persistence.entity.AgentMessageEntity;
 import com.ai.agent.persistence.entity.AgentToolResultTraceEntity;
+import com.ai.agent.security.SensitivePayloadSanitizer;
 import com.ai.agent.tool.model.CancelReason;
 import com.ai.agent.tool.model.ToolCall;
 import com.ai.agent.tool.model.ToolTerminal;
@@ -33,21 +34,29 @@ public final class ToolResultCloser {
     private final TrajectoryStore trajectoryStore;
     private final TrajectoryReader trajectoryReader;
     private final ToolResultPubSub pubSub;
+    private final SensitivePayloadSanitizer sanitizer;
     private final Object[] closeLocks = createCloseLocks();
 
     @Autowired
     public ToolResultCloser(
             TrajectoryStore trajectoryStore,
             TrajectoryReader trajectoryReader,
-            ObjectProvider<ToolResultPubSub> pubSubProvider
+            ObjectProvider<ToolResultPubSub> pubSubProvider,
+            SensitivePayloadSanitizer sanitizer
     ) {
-        this(trajectoryStore, trajectoryReader, pubSubProvider == null ? null : pubSubProvider.getIfAvailable());
+        this(trajectoryStore, trajectoryReader, pubSubProvider == null ? null : pubSubProvider.getIfAvailable(), sanitizer);
     }
 
-    private ToolResultCloser(TrajectoryStore trajectoryStore, TrajectoryReader trajectoryReader, ToolResultPubSub pubSub) {
+    private ToolResultCloser(
+            TrajectoryStore trajectoryStore,
+            TrajectoryReader trajectoryReader,
+            ToolResultPubSub pubSub,
+            SensitivePayloadSanitizer sanitizer
+    ) {
         this.trajectoryStore = trajectoryStore;
         this.trajectoryReader = trajectoryReader;
         this.pubSub = pubSub;
+        this.sanitizer = sanitizer;
     }
 
     public void closeTerminal(String runId, ToolCall call, ToolTerminal terminal, AgentEventSink sink) {
@@ -110,14 +119,15 @@ public final class ToolResultCloser {
             AgentEventSink sink,
             ClosedState closed
     ) {
+        ToolTerminal persistedTerminal = sanitizeTerminal(terminal);
         boolean wrote = false;
         if (!closed.resultToolCallIds().contains(call.toolCallId())) {
-            trajectoryStore.writeToolResult(runId, call.toolUseId(), terminal);
+            trajectoryStore.writeToolResult(runId, call.toolUseId(), persistedTerminal);
             closed.resultToolCallIds().add(call.toolCallId());
             wrote = true;
         }
         if (!closed.toolMessageUseIds().contains(call.toolUseId())) {
-            trajectoryStore.appendMessage(runId, LlmMessage.tool(Ids.newId("msg"), call.toolUseId(), terminalContent(terminal)));
+            trajectoryStore.appendMessage(runId, LlmMessage.tool(Ids.newId("msg"), call.toolUseId(), terminalContent(persistedTerminal)));
             closed.toolMessageUseIds().add(call.toolUseId());
             wrote = true;
         }
@@ -125,9 +135,9 @@ public final class ToolResultCloser {
             sink.onToolResult(new ToolResultEvent(
                     runId,
                     call.toolUseId(),
-                    terminal.status(),
-                    terminal.resultJson(),
-                    terminal.errorJson()
+                    persistedTerminal.status(),
+                    persistedTerminal.resultJson(),
+                    persistedTerminal.errorJson()
             ));
         }
         if (wrote && pubSub != null) {
@@ -172,6 +182,17 @@ public final class ToolResultCloser {
             return terminal.errorJson();
         }
         return "{\"type\":\"empty_tool_result\"}";
+    }
+
+    private ToolTerminal sanitizeTerminal(ToolTerminal terminal) {
+        return new ToolTerminal(
+                terminal.toolCallId(),
+                terminal.status(),
+                sanitizer.sanitizeJsonString(terminal.resultJson()),
+                sanitizer.sanitizeJsonString(terminal.errorJson()),
+                terminal.cancelReason(),
+                terminal.synthetic()
+        );
     }
 
     private record ClosedState(Set<String> resultToolCallIds, Set<String> toolMessageUseIds) {

@@ -4,6 +4,7 @@ import com.ai.agent.application.AgentRequestPolicy;
 import com.ai.agent.application.AgentRunApplicationService;
 import com.ai.agent.application.RunAccessManager;
 import com.ai.agent.application.RunInterruptService;
+import com.ai.agent.security.SensitivePayloadSanitizer;
 import com.ai.agent.trajectory.dto.AgentRunTrajectoryDto;
 import com.ai.agent.web.dto.AgentRunRequest;
 import com.ai.agent.web.dto.ContinueRunRequest;
@@ -45,19 +46,22 @@ public class AgentController {
     private final ScheduledExecutorService sseScheduler;
     private final SseMetrics sseMetrics;
     private final AgentEventRecorder eventRecorder;
+    private final SensitivePayloadSanitizer sanitizer;
 
     public AgentController(
             AgentRunApplicationService applicationService,
             @Qualifier("agentExecutor") ExecutorService agentExecutor,
             @Qualifier("sseScheduler") ScheduledExecutorService sseScheduler,
             SseMetrics sseMetrics,
-            AgentEventRecorder eventRecorder
+            AgentEventRecorder eventRecorder,
+            SensitivePayloadSanitizer sanitizer
     ) {
         this.applicationService = applicationService;
         this.agentExecutor = agentExecutor;
         this.sseScheduler = sseScheduler;
         this.sseMetrics = sseMetrics;
         this.eventRecorder = eventRecorder;
+        this.sanitizer = sanitizer;
     }
 
     @PostMapping(value = "/runs", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -110,7 +114,7 @@ public class AgentController {
 
     private SseEmitter submitSse(AgentRunApplicationService.RunStreamPlan plan) {
         SseEmitter emitter = new SseEmitter(310_000L);
-        SseAgentEventSink sseSink = new SseAgentEventSink(emitter, sseScheduler, sseMetrics);
+        SseAgentEventSink sseSink = new SseAgentEventSink(emitter, sseScheduler, sseMetrics, sanitizer);
         AgentEventSink sink = new RecordingAgentEventSink(sseSink, eventRecorder);
         Map<String, String> parentMdc = MDC.getCopyOfContextMap();
         try {

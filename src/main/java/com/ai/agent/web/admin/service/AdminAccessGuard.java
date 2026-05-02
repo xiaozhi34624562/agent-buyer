@@ -1,11 +1,13 @@
 package com.ai.agent.web.admin.service;
 
 import com.ai.agent.config.AgentProperties;
-import org.springframework.core.env.Environment;
-import org.springframework.stereotype.Component;
-
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.Set;
+import org.springframework.core.env.Environment;
+import org.springframework.stereotype.Component;
 
 @Component
 public class AdminAccessGuard {
@@ -45,11 +47,24 @@ public class AdminAccessGuard {
             throw new AdminAccessDeniedException("admin token required");
         }
 
-        if (!configuredToken.equals(providedToken)) {
+        if (!tokenMatches(configuredToken, providedToken)) {
             throw new AdminAccessDeniedException("invalid admin token");
         }
 
         return true;
+    }
+
+    private boolean tokenMatches(String configuredToken, String providedToken) {
+        return MessageDigest.isEqual(sha256(configuredToken), sha256(providedToken));
+    }
+
+    private byte[] sha256(String value) {
+        try {
+            return MessageDigest.getInstance("SHA-256")
+                    .digest(value == null ? new byte[0] : value.getBytes(StandardCharsets.UTF_8));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is unavailable", e);
+        }
     }
 
     public static class AdminAccessDeniedException extends RuntimeException {

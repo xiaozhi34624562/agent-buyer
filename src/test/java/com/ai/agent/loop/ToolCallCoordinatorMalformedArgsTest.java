@@ -5,6 +5,7 @@ import com.ai.agent.domain.FinishReason;
 import com.ai.agent.llm.model.LlmMessage;
 import com.ai.agent.llm.model.LlmStreamResult;
 import com.ai.agent.llm.model.ToolCallMessage;
+import com.ai.agent.security.SensitivePayloadSanitizer;
 import com.ai.agent.tool.core.Tool;
 import com.ai.agent.tool.core.ToolSchema;
 import com.ai.agent.tool.core.ToolUseContext;
@@ -45,6 +46,8 @@ class ToolCallCoordinatorMalformedArgsTest {
         TrajectoryStore trajectoryStore = mock(TrajectoryStore.class);
         TrajectoryReader trajectoryReader = mock(TrajectoryReader.class);
         ToolResultCloser closer = mock(ToolResultCloser.class);
+        ObjectMapper objectMapper = new ObjectMapper();
+        SensitivePayloadSanitizer sanitizer = new SensitivePayloadSanitizer(objectMapper);
         when(trajectoryReader.findToolCallsByRun("run-1")).thenReturn(List.of());
         ToolCallCoordinator coordinator = new ToolCallCoordinator(
                 new AgentProperties(),
@@ -56,7 +59,8 @@ class ToolCallCoordinatorMalformedArgsTest {
                 trajectoryReader,
                 closer,
                 mock(PendingConfirmToolStore.class),
-                new ObjectMapper()
+                objectMapper,
+                sanitizer
         );
         LlmStreamResult result = new LlmStreamResult(
                 "更新第一步",
