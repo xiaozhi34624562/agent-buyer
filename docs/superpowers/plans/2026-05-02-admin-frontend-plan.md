@@ -1,10 +1,10 @@
-# Agent Buyer Console 实现计划
+# Agent Buyer Console V3 实现计划
 
 > **给 agentic worker 的要求：** 实现本计划时必须使用 `superpowers:subagent-driven-development`，推荐按任务派发 sub agent；也可以使用 `superpowers:executing-plans` 在当前会话逐项执行。所有步骤使用 checkbox 语法跟踪。
 
-**目标：** 构建一个本地可演示、可调试的 Agent Buyer Console，用来观察 `agent-buyer` 的对话、SSE 流、run 轨迹、工具调用、human-in-the-loop 状态和当前 Redis runtime state。
+**目标：** 在 V3 中构建一个本地可演示、可调试的 Agent Buyer Console，用来观察 `agent-buyer` 的对话、SSE 流、run 轨迹、工具调用、human-in-the-loop 状态和当前 Redis runtime state。
 
-**架构：** V1 是 agent console，不是通用数据库管理后台。前端复用现有 `/api/agent/*` 接口完成 chat、SSE、trajectory 查询，只新增两个最小 admin 能力：分页 run list 和经过脱敏、限定范围的当前 run runtime-state。原始 MySQL 表浏览、任意 Redis key 浏览推迟到独立 admin-inspector 版本，不进入本阶段。
+**架构：** V3 是 agent console，不是通用数据库管理后台。前端复用现有 `/api/agent/*` 接口完成 chat、SSE、trajectory 查询，只新增两个最小 admin 能力：分页 run list 和经过脱敏、限定范围的当前 run runtime-state。原始 MySQL 表浏览、任意 Redis key 浏览推迟到独立 admin-inspector 版本，不进入本阶段。
 
 **技术栈：** 后端使用 Spring Boot 3.3、MyBatis Plus、Redis；前端使用 React 18、TypeScript、Vite、Tailwind CSS、lucide-react、Vitest、React Testing Library。
 
@@ -12,7 +12,7 @@
 
 ## 0. 范围重新定义
 
-### 0.1 V1 产品形态
+### 0.1 V3 产品形态
 
 第一版前端要帮助 reviewer 快速理解 agent 生命周期，而不是替代 IDEA Database、RedisInsight 或运维后台。
 
@@ -30,7 +30,7 @@ Run List         Run Timeline                         Chat / Controls
 - 当前 run 在 Redis 中还有哪些活跃 runtime state？
 - human-in-the-loop 确认、缺槽追问、interrupt、SubAgent、ToDo 是否按预期工作？
 
-### 0.2 V1 不做什么
+### 0.2 V3 不做什么
 
 - 不做通用 MySQL table browser。
 - 不暴露任意 Redis key lookup。
@@ -38,7 +38,7 @@ Run List         Run Timeline                         Chat / Controls
 - 不暴露 `confirmToken`、provider 原始诊断 payload、API key、未脱敏完整 tool result JSON。
 - 不引入 Spring Security。本阶段是本地 demo console，认证只做最小 `X-Admin-Token` guard。
 
-### 0.3 V1 后端接口契约
+### 0.3 V3 后端接口契约
 
 Chat、SSE、trajectory 直接使用现有接口：
 

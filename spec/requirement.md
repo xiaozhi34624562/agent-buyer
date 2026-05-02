@@ -34,6 +34,14 @@
   - A.5 V2 多实例与结果通知
   - A.6 V2 中断与 LLM 调用预算
   - A.7 V2 测试
+- 附录 B：V3 Agent Buyer Console 详细需求
+  - B.0 V3 定位
+  - B.1 V3 里程碑拆分
+  - B.2 V3 对外接口
+  - B.3 V3 前端能力
+  - B.4 V3 后端 Console API
+  - B.5 V3 安全边界
+  - B.6 V3 测试与验收
 
 ## 0. 业务背景
 
@@ -1620,3 +1628,296 @@ V2 必须新增测试：
 - 用户 interrupt 后当前 turn 结束，WAITING 工具不再执行，RUNNING 工具收到 cancellation token
 - MainAgent interrupt 会级联中断所有 child run
 - late SubAgent result 不会污染 MainAgent transcript
+
+## 附录 B：V3 Agent Buyer Console 详细需求
+
+### B.0 V3 定位
+
+V3 在 V1a/V2 Agent 能力之上增加一个本地可演示、可调试的 Agent Buyer Console。它不是通用 MySQL/Redis 管理后台，而是面向 agent lifecycle 的观察台，用于展示：
+
+- run 列表与状态推进
+- trajectory timeline
+- Chat / SSE 实时输出
+- tool call / tool result / tool progress
+- human-in-the-loop 确认与拒绝
+- `PAUSED` continuation、interrupt、abort
+- Context compact、SubAgent、ToDo 等 V2 能力的轨迹结果
+- 当前 run 的 Redis runtime state
+
+V3 的产品目标：
+
+```text
+让 reviewer 不需要打开 IDEA Database、RedisInsight 或翻日志，
+就能在一个页面里看懂 agent-buyer 的关键工程能力。
+```
+
+V3 的边界：
+
+- Console 是 demo/debug 工具，不是生产运营后台
+- Chat 路径必须复用现有 `/api/agent/*`，不能新增另一套 chat proxy
+- Admin 查询 API 只提供 console 需要的安全投影
+- 不暴露任意 SQL、任意 Redis key、`confirmToken`、provider raw payload 或 secret
+
+### B.1 V3 里程碑拆分
+
+V3 分为五个里程碑：
+
+| 里程碑 | 内容 | 验收信号 |
+|---|---|---|
+| V3-M1 | Backend Console API | `GET /api/admin/console/runs` 与 runtime-state 可用，`mvn test` 通过 |
+| V3-M2 | Frontend Shell | `admin-web` 三栏 console 可用 mock data 渲染，`npm test && npm run build` 通过 |
+| V3-M3 | Real Data Integration | run list、timeline、runtime-state 接入真实后端数据 |
+| V3-M4 | Chat + SSE | 可创建 run、继续 run、确认/拒绝、interrupt、abort |
+| V3-M5 | Hardening / Demo | README、启动脚本、集成测试、浏览器 smoke 完成 |
+
+执行约束：
+
+- V3-M1 完成前不能开始 V3-M2
+- V3-M3 能展示真实 run trajectory 前不能开始 V3-M4
+- 每个里程碑完成后执行 review gate
+- 每个 task 独立提交，便于回滚和评审
+
+### B.2 V3 对外接口
+
+V3 必须复用现有 Agent API：
+
+```text
+POST /api/agent/runs
+POST /api/agent/runs/{runId}/messages
+GET  /api/agent/runs/{runId}
+POST /api/agent/runs/{runId}/abort
+POST /api/agent/runs/{runId}/interrupt
+```
+
+V3 只新增两个 Admin Console API：
+
+```text
+GET /api/admin/console/runs
+GET /api/admin/console/runs/{runId}/runtime-state
+```
+
+`/api/agent/*` header：
+
+```text
+X-User-Id: <selected userId>
+```
+
+`/api/admin/*` header：
+
+```text
+X-Admin-Token: <optional token>
+```
+
+当 `agent.admin.token` 为空时，本地 demo 允许访问 admin endpoint；当 token 非空时，必须校验 `X-Admin-Token`。
+
+### B.3 V3 前端能力
+
+V3 前端放在仓库内：
+
+```text
+admin-web/
+```
+
+技术栈：
+
+```text
+React 18
+TypeScript
+Vite
+Tailwind CSS
+lucide-react
+Vitest
+React Testing Library
+```
+
+页面布局：
+
+```text
+Run List         Run Timeline                         Chat / Controls
+最近 runs         messages / attempts / tools / events   用户输入 / SSE 流 / HITL
+状态筛选          compactions / child links              abort / interrupt / continue
+
+Debug Drawer:
+  Runtime State
+  SSE Event Log
+```
+
+桌面端：
+
+```text
+header 48px
+main grid:
+  left  280px min, 22vw max
+  middle minmax(420px, 1fr)
+  right 380px min, 32vw max
+```
+
+移动端：
+
+```text
+tabs: Runs | Timeline | Chat
+debug drawer 独立打开
+```
+
+Run List 必须展示：
+
+- status badge
+- 短 runId
+- userId
+- provider/model
+- turnNo
+- updatedAt
+- parentRunId / parentLinkStatus
+
+Timeline 必须合并展示：
+
+```text
+messages       -> MESSAGE
+llmAttempts    -> LLM_ATTEMPT
+toolCalls      -> TOOL_CALL
+toolResults    -> TOOL_RESULT
+toolProgress   -> TOOL_PROGRESS
+events         -> EVENT
+compactions    -> COMPACTION
+```
+
+Chat 必须支持：
+
+- 创建 run
+- continuation
+- `WAITING_USER_CONFIRMATION` 的确认/拒绝
+- `PAUSED + user_input` 的补充输入
+- interrupt
+- abort
+- SSE debug log
+
+SSE 解析要求：
+
+- Chat 使用 POST，因此不能用浏览器 `EventSource`
+- 前端必须用 `fetch + ReadableStream` 解析 SSE
+- 必须支持 split chunk、单 chunk 多 event、`ping` event、非法 JSON error event
+
+### B.4 V3 后端 Console API
+
+新增 package：
+
+```text
+com.ai.agent.web.admin
+  controller
+    AdminConsoleController
+  dto
+    AdminPageResponse
+    AdminRunListResponse
+    AdminRunSummaryDto
+    AdminRuntimeStateDto
+    AdminRedisEntryDto
+  service
+    AdminAccessGuard
+    AdminRunListService
+    AdminRuntimeStateService
+```
+
+`GET /api/admin/console/runs` 支持：
+
+```text
+page
+pageSize
+status
+userId
+```
+
+分页边界：
+
+```text
+page min = 1
+pageSize default = 20
+pageSize max = 100
+```
+
+查询规则：
+
+- provider/model 从 `agent_run_context` 读取
+- 固定 `ORDER BY r.updated_at DESC`
+- 只允许 `status` 和 `userId` 两个过滤条件
+- 不允许动态表名、动态排序字段或自由 SQL
+
+`GET /api/admin/console/runs/{runId}/runtime-state` 只允许读取：
+
+```text
+agent:active-runs
+agent:{run:<runId>}:meta
+agent:{run:<runId>}:queue
+agent:{run:<runId>}:tools
+agent:{run:<runId>}:tool-use-ids
+agent:{run:<runId>}:leases
+agent:{run:<runId>}:continuation-lock
+agent:{run:<runId>}:control
+agent:{run:<runId>}:llm-call-budget
+agent:{run:<runId>}:children
+agent:{run:<runId>}:todos
+agent:{run:<runId>}:todo-reminder
+```
+
+禁止：
+
+- 读取 `confirm-tokens`
+- wildcard scan Redis
+- 让用户传入任意 Redis key
+- 返回 provider raw diagnostic payload
+
+### B.5 V3 安全边界
+
+V3 必须遵守：
+
+- 不做通用 MySQL table browser
+- 不做任意 Redis key browser
+- 不新增 `/api/admin/chat`
+- 不展示原始 `confirmToken`
+- 不在日志、debug panel、SSE log 中打印 admin token 或 provider key
+- Runtime state 只能是当前 run 的固定 key 投影
+- Trajectory 继续使用已有安全 DTO 和脱敏策略
+- terminal run 禁用 interrupt / abort 按钮
+
+V3 视觉与交互约束：
+
+- 控制台优先，不做 landing page
+- 不使用营销式 hero、大面积装饰背景或 gradient orb
+- 不做卡片套卡片
+- 按钮优先使用 lucide icon
+- 面板内文字不能溢出
+- 移动端使用 tabs，不能出现三栏挤压重叠
+
+### B.6 V3 测试与验收
+
+后端测试必须覆盖：
+
+- `AdminAccessGuard`：token blank / match / mismatch / disabled
+- `AdminRunListService`：分页、过滤、排序、join `agent_run_context`
+- `AdminRuntimeStateService`：只读固定 Redis key，不包含 `confirm-tokens`
+- `AdminConsoleController`：正常响应与 400 / 403 / 503 异常映射
+
+前端测试必须覆盖：
+
+- `sseParser`：split chunk、多 event、`ping`、非法 JSON
+- `RunListPanel`：loading、empty、error、data
+- `TimelinePanel`：message、attempt、tool、event、compaction 都可渲染
+- `RuntimeStateView`：缺失 key 可渲染，不显示 confirm token
+- `useChatStream`：happy path、HITL、PAUSED user input、error event
+- `ChatPanel`：create、continue、confirm、reject、interrupt、abort
+- `App.integration`：run list、timeline、chat、runtime state 串联
+
+最终验收命令：
+
+```bash
+MYSQL_PASSWORD='Qaz1234!' mvn test
+cd admin-web && npm test && npm run build
+```
+
+真实 LLM e2e 作为独立 smoke：
+
+```bash
+MYSQL_PASSWORD='Qaz1234!' \
+DEEPSEEK_API_KEY='<local env only>' \
+QWEN_API_KEY='<local env only>' \
+./scripts/real-llm-e2e.sh
+```

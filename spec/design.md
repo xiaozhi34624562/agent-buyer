@@ -48,8 +48,16 @@
   - 11.8 多实例推进
   - 11.9 V2 配置
   - 11.10 V2 测试计划
-- 12. 后续演进
-- 13. 关键结论
+- 12. V3 Agent Buyer Console 设计
+  - 12.1 V3 架构定位
+  - 12.2 前端架构
+  - 12.3 后端 Admin Console API
+  - 12.4 Chat / SSE 集成
+  - 12.5 Runtime State 安全模型
+  - 12.6 V3 配置
+  - 12.7 V3 测试计划
+- 13. 后续演进
+- 14. 关键结论
 
 ## 1. 背景与目标
 
@@ -2686,7 +2694,469 @@ agent:
 - MainAgent interrupt 会级联中断 active child runs
 - late SubAgent result 不会污染 MainAgent transcript
 
-## 12. 后续演进
+## 12. V3 Agent Buyer Console 设计
+
+### 12.1 V3 架构定位
+
+V3 在现有 AgentLoop、V2 provider/context/skill/SubAgent/ToDo 能力之上增加一个前端 Console。它的定位是“agent lifecycle 可视化与本地 demo 调试台”，不是通用后台管理系统。
+
+V3 不改变 AgentLoop 主链路：
+
+```text
+用户对话
+  ↓
+/api/agent/runs 或 /api/agent/runs/{runId}/messages
+  ↓
+AgentRunApplicationService
+  ↓
+AgentLoop / ToolRuntime / TrajectoryStore
+  ↓
+SSE 返回
+```
+
+Console 只做两件事：
+
+1. 复用现有 `/api/agent/*` 进行真实 chat、continuation、trajectory、abort、interrupt。
+2. 新增最小 `/api/admin/console/*` 查询接口，用安全投影展示 run list 和当前 run runtime state。
+
+整体结构：
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│                 admin-web (React Console)                    │
+│                                                             │
+│  ┌──────────────┬─────────────────────┬──────────────────┐  │
+│  │  Run List    │    Run Timeline      │  Chat / Controls │  │
+│  │              │                     │                  │  │
+│  │  status      │  messages           │  user input      │  │
+│  │  userId      │  attempts           │  SSE stream      │  │
+│  │  provider    │  tool calls/results │  HITL actions    │  │
+│  │  model       │  events/compactions │  abort/interrupt │  │
+│  └──────────────┴─────────────────────┴──────────────────┘  │
+│                                                             │
+│  Debug Drawer: current-run runtime state + SSE event log     │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              │ REST + POST SSE
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                 agent-buyer Spring Boot                      │
+│                                                             │
+│  Existing API                                                │
+│    /api/agent/runs                                           │
+│    /api/agent/runs/{runId}/messages                          │
+│    /api/agent/runs/{runId}                                   │
+│    /api/agent/runs/{runId}/abort                             │
+│    /api/agent/runs/{runId}/interrupt                         │
+│                                                             │
+│  V3 Admin Console API                                        │
+│    /api/admin/console/runs                                   │
+│    /api/admin/console/runs/{runId}/runtime-state             │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+        ┌─────────────────┬─────────────────────────────┐
+        │     MySQL       │            Redis            │
+        │  trajectory     │ current run runtime state   │
+        └─────────────────┴─────────────────────────────┘
+```
+
+V3 关键取舍：
+
+- 不做 `/api/admin/chat`。否则 console 看到的行为可能和真实用户路径不一致。
+- 不做通用 MySQL/Redis browser。Console 只展示 agent 相关安全投影。
+- Runtime state 只读 `RedisKeys` 派生出的固定 key。
+- Trajectory 复用已有安全 DTO，避免暴露 persistence entity 或 provider raw payload。
+
+### 12.2 前端架构
+
+前端工程目录：
+
+```text
+admin-web/
+  package.json
+  vite.config.ts
+  tailwind.config.ts
+  postcss.config.js
+  tsconfig.json
+  index.html
+  src/
+    main.tsx
+    App.tsx
+    index.css
+    api/
+      agentApi.ts
+      adminApi.ts
+      sseParser.ts
+    components/
+      shell/
+        ConsoleShell.tsx
+        Toolbar.tsx
+      runs/
+        RunListPanel.tsx
+        RunListItem.tsx
+        RunFilters.tsx
+      timeline/
+        TimelinePanel.tsx
+        TimelineItem.tsx
+        MessageNode.tsx
+        LlmAttemptNode.tsx
+        ToolCallNode.tsx
+        EventNode.tsx
+        CompactionNode.tsx
+      chat/
+        ChatPanel.tsx
+        ChatTranscript.tsx
+        ChatComposer.tsx
+        RunControls.tsx
+        ConfirmationBar.tsx
+      debug/
+        DebugDrawer.tsx
+        SseEventLog.tsx
+        RuntimeStateView.tsx
+      ui/
+        Button.tsx
+        IconButton.tsx
+        Badge.tsx
+        EmptyState.tsx
+        ErrorBanner.tsx
+        Spinner.tsx
+    hooks/
+      useRunList.ts
+      useRunDetail.ts
+      useRuntimeState.ts
+      useChatStream.ts
+    types/
+      agent.ts
+      admin.ts
+      sse.ts
+```
+
+布局：
+
+```text
+desktop:
+  header 48px
+  left   Run List         280px min, 22vw max
+  middle Run Timeline     minmax(420px, 1fr)
+  right  Chat / Controls  380px min, 32vw max
+
+mobile:
+  tabs: Runs | Timeline | Chat
+```
+
+`App` 持有全局状态：
+
+```text
+selectedRunId
+selectedUserId default "demo-user"
+adminToken from localStorage
+debugOpen
+```
+
+`RunListPanel` 展示：
+
+```text
+status badge
+短 runId
+userId
+primaryProvider / fallbackProvider / model
+turnNo
+updatedAt
+parentRunId
+parentLinkStatus
+```
+
+`TimelinePanel` 合并这些 trajectory 数组：
+
+```text
+messages       -> MESSAGE
+llmAttempts    -> LLM_ATTEMPT
+toolCalls      -> TOOL_CALL
+toolResults    -> TOOL_RESULT
+toolProgress   -> TOOL_PROGRESS
+events         -> EVENT
+compactions    -> COMPACTION
+```
+
+排序规则：
+
+```text
+优先按 timestamp 排序
+时间相同或缺失时稳定排序：
+message -> tool call -> tool progress -> tool result -> event -> compaction
+```
+
+`ChatPanel` 支持：
+
+- 创建 run
+- continuation
+- `WAITING_USER_CONFIRMATION` 的确认/拒绝
+- `PAUSED + user_input` 的补充输入
+- interrupt
+- abort
+- SSE event debug log
+
+### 12.3 后端 Admin Console API
+
+新增 package：
+
+```text
+com.ai.agent.web.admin
+  controller
+    AdminConsoleController
+  dto
+    AdminPageResponse
+    AdminRunListResponse
+    AdminRunSummaryDto
+    AdminRuntimeStateDto
+    AdminRedisEntryDto
+  service
+    AdminAccessGuard
+    AdminRunListService
+    AdminRuntimeStateService
+```
+
+Admin access：
+
+```yaml
+agent:
+  admin:
+    enabled: ${AGENT_ADMIN_ENABLED:true}
+    token: ${AGENT_ADMIN_TOKEN:}
+```
+
+规则：
+
+- `enabled=false` 返回 503。
+- `token` 为空时允许本地 demo 访问。
+- `token` 非空时必须校验 `X-Admin-Token`。
+
+Run list endpoint：
+
+```text
+GET /api/admin/console/runs?page=1&pageSize=20&status=RUNNING&userId=demo-user
+```
+
+DTO：
+
+```java
+public record AdminRunSummaryDto(
+        String runId,
+        String userId,
+        String status,
+        Integer turnNo,
+        String agentType,
+        String parentRunId,
+        String parentLinkStatus,
+        String primaryProvider,
+        String fallbackProvider,
+        String model,
+        Integer maxTurns,
+        LocalDateTime startedAt,
+        LocalDateTime updatedAt,
+        LocalDateTime completedAt,
+        String lastError
+) {
+}
+```
+
+查询规则：
+
+- 从 `agent_run` 读取 run 基础信息。
+- 左连接 `agent_run_context` 读取 provider/model/maxTurns。
+- 可选过滤只有 `status` 和 `userId`。
+- 固定排序 `ORDER BY r.updated_at DESC`。
+- 不支持用户传入 sort 字段、表名或自由 SQL。
+
+Runtime state endpoint：
+
+```text
+GET /api/admin/console/runs/{runId}/runtime-state
+```
+
+DTO：
+
+```java
+public record AdminRuntimeStateDto(
+        String runId,
+        boolean activeRun,
+        List<AdminRedisEntryDto> entries
+) {
+}
+```
+
+### 12.4 Chat / SSE 集成
+
+前端 Chat 不使用 `EventSource`，因为创建 run 和 continuation 都是 POST 请求。必须用 `fetch + ReadableStream` 解析 SSE。
+
+SSE event：
+
+```text
+text_delta
+tool_use
+tool_progress
+tool_result
+final
+error
+ping
+```
+
+事件处理：
+
+| Event | 前端效果 |
+|---|---|
+| `text_delta` | append 到 assistant draft |
+| `tool_use` | 增加 tool card |
+| `tool_progress` | 更新 progress card |
+| `tool_result` | 增加 result preview |
+| `final` | 设置 runId/status/nextActionRequired，关闭 draft |
+| `error` | 设置 error，停止 streaming |
+| `ping` | 只进入 debug log，不进入 chat transcript |
+
+创建 run 默认请求：
+
+```json
+{
+  "messages": [{"role": "user", "content": "<input>"}],
+  "allowedToolNames": [
+    "query_order",
+    "cancel_order",
+    "skill_list",
+    "skill_view",
+    "agent_tool",
+    "todo_create",
+    "todo_write"
+  ],
+  "llmParams": {
+    "model": "deepseek-reasoner",
+    "temperature": 0,
+    "maxTokens": 4096,
+    "maxTurns": 10
+  }
+}
+```
+
+Continuation：
+
+```text
+POST /api/agent/runs/{runId}/messages
+X-User-Id: <selected userId>
+body: {"message":{"role":"user","content":"..."}}
+```
+
+`WAITING_USER_CONFIRMATION`：
+
+```text
+Confirm button -> "确认继续执行"
+Reject button  -> "放弃本次操作"
+```
+
+`PAUSED + user_input`：
+
+```text
+Composer placeholder -> "补充订单号、说明或下一步指令..."
+```
+
+### 12.5 Runtime State 安全模型
+
+Runtime state 只允许读取以下 Redis key：
+
+```text
+agent:active-runs
+agent:{run:<runId>}:meta
+agent:{run:<runId>}:queue
+agent:{run:<runId>}:tools
+agent:{run:<runId>}:tool-use-ids
+agent:{run:<runId>}:leases
+agent:{run:<runId>}:continuation-lock
+agent:{run:<runId>}:control
+agent:{run:<runId>}:llm-call-budget
+agent:{run:<runId>}:children
+agent:{run:<runId>}:todos
+agent:{run:<runId>}:todo-reminder
+```
+
+明确禁止：
+
+- 读取 `confirm-tokens`
+- wildcard scan
+- 用户输入任意 Redis key
+- 将 Redis key 放入 path variable
+- 返回 provider raw diagnostic payload
+
+展示分组：
+
+```text
+Control: meta, continuation-lock, control, llm-call-budget
+Tool Runtime: queue, tools, tool-use-ids, leases
+Planning: todos, todo-reminder
+SubAgent: children
+Active: active-runs
+```
+
+### 12.6 V3 配置
+
+后端：
+
+```yaml
+agent:
+  admin:
+    enabled: ${AGENT_ADMIN_ENABLED:true}
+    token: ${AGENT_ADMIN_TOKEN:}
+```
+
+前端：
+
+```text
+admin-web dev server: http://127.0.0.1:5173
+Vite proxy /api -> http://127.0.0.1:8080
+```
+
+本地启动：
+
+```bash
+MYSQL_PASSWORD='Qaz1234!' mvn spring-boot:run
+cd admin-web && npm run dev
+```
+
+### 12.7 V3 测试计划
+
+后端测试：
+
+- `AdminAccessGuardTest`
+- `AdminRunListServiceTest`
+- `AdminRuntimeStateServiceTest`
+- `AdminConsoleControllerTest`
+
+前端测试：
+
+- `sseParser.test.ts`
+- `RunListPanel.test.tsx`
+- `TimelinePanel.test.tsx`
+- `RuntimeStateView.test.tsx`
+- `useChatStream.test.tsx`
+- `ChatPanel.test.tsx`
+- `App.integration.test.tsx`
+
+最终验证：
+
+```bash
+MYSQL_PASSWORD='Qaz1234!' mvn test
+cd admin-web && npm test && npm run build
+```
+
+浏览器 smoke：
+
+```text
+desktop 1440x900
+mobile 390x844
+无面板重叠
+按钮文字不溢出
+chat 可发送 prompt 并收到 SSE final
+```
+
+## 13. 后续演进
 
 V2 之后再考虑：
 
@@ -2694,8 +3164,9 @@ V2 之后再考虑：
 - 完整幂等恢复 / outbox
 - MQ worker 解耦
 - 大结果对象存储 spill
+- V3 后续可以独立演进 admin-inspector，但必须和 Agent Console 分离，避免把 demo console 做成高风险通用运维后台
 
-## 13. 关键结论
+## 14. 关键结论
 
 V1a 不是一个大而全的 agent framework，而是一个业务系统 AI 赋能层。它的价值在于把真实业务能力包装成 LLM 可调用的 tool，并把“模型输出、工具执行、状态一致性、轨迹追溯、安全防护、SSE 用户体验”串成一个可演示、可解释、可扩展的闭环。
 
@@ -2717,6 +3188,13 @@ V2:
   + AgentTool child run
   + Redis ToDo short-term memory
   + Active Runs Set multi-instance sweeper
+
+V3:
+  + Agent Buyer Console
+  + run list / trajectory timeline
+  + chat + POST SSE debug
+  + current-run Redis runtime state
+  + HITL / PAUSED / interrupt / abort 可视化
 ```
 
 这个路线比做一个“看起来什么都有，但每块都很薄”的 harness 更适合作为 Java 业务系统 AI 改造 demo，也更适合作为求职作品集展示。
