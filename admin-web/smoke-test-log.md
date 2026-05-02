@@ -64,3 +64,47 @@ The frontend `useRunDetail` hook and `TimelinePanel` were designed based on an a
 - E2E real backend: API contract mismatch identified - requires contract alignment
 
 Frontend development complete. Backend/frontend contract alignment needed for full E2E integration.
+
+---
+
+## E2E Real Backend Test - SUCCESS (2026-05-02 Final)
+
+### Resolution Applied
+
+Created `src/utils/trajectoryTransform.ts` to transform backend DTO format to frontend TrajectoryNode format:
+- Backend: `{ run, messages, llmAttempts, toolCalls, toolResults, events, toolProgress, compactions }`
+- Frontend: `{ runId, nodes: TrajectoryNode[] }`
+
+Modified `useRunDetail.ts` to parse both formats via `parseTrajectoryResponse()`.
+
+### Verified Features
+
+1. **Timeline Display**: Successfully shows "Timeline (48 nodes)" from real backend run
+2. **Node Types Rendered**:
+   - MESSAGE nodes (system, user, assistant, tool roles)
+   - LLM_ATTEMPT nodes with provider/model/tokens
+   - TOOL_CALL nodes with toolName
+   - TOOL_PROGRESS nodes with percent/message
+   - TOOL_RESULT nodes with result preview
+   - EVENT nodes (skill_slash_injected, tool_use, tool_result, final)
+   - COMPACTION nodes (LARGE_RESULT_SPILL, MICRO_COMPACT, SUMMARY_COMPACT)
+3. **Run List**: Displays real run data correctly
+4. **Chat Input**: Functional and ready for interaction
+
+### Minor Issues
+
+- Console error for `/api/admin/console/runs/{runId}/runtime-state` endpoint (not implemented on backend)
+- Does not affect timeline display
+
+### Final Status
+
+**E2E Integration Complete.** All V3 milestones achieved:
+- V3M5-01: API hooks implemented
+- V3M5-02: TimelinePanel with node cards
+- V3M5-03: Test fixtures created
+- V3M5-04: Integration tests (5 tests passing)
+- V3M5-05: Browser smoke tests (desktop + mobile)
+- V3M5-06: ESLint fixes and code review passed
+- V3M5-07: E2E real backend integration verified
+
+Total commits: 44+ ahead of origin. Ready for push when user approves.
