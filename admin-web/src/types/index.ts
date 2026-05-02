@@ -77,9 +77,11 @@ export interface SseEvent {
   args?: Record<string, unknown>
   result?: string
   percent?: number
+  message?: string
   status?: string
   nextActionRequired?: string
   error?: string
+  confirmToken?: string // Will be redacted before processing
 }
 
 export interface SseTextDeltaEvent extends SseEvent {
@@ -107,6 +109,7 @@ export interface SseToolResultEvent extends SseEvent {
   toolName: string
   result: string
   status: string
+  confirmToken?: string // Will be redacted
 }
 
 export interface SseFinalEvent extends SseEvent {
