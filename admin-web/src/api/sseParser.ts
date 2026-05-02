@@ -8,7 +8,13 @@ export interface SseParseResult {
 /**
  * Parse SSE data lines into events.
  * Handles split chunks, multiple events per chunk, ping, and malformed JSON.
- * Normalizes toolName field (handles legacy 'name' field).
+ * Normalizes backend field names to frontend expected format:
+ * - delta -> content
+ * - toolUseId -> toolCallId
+ * - argsJson -> args (parsed)
+ * - resultJson -> result
+ * - errorJson -> error (for tool_result)
+ * - toolName (handles legacy 'name' field)
  */
 export function parseSseData(data: string): SseEvent | null {
   // Empty data means nothing to parse
@@ -24,10 +30,61 @@ export function parseSseData(data: string): SseEvent | null {
   try {
     const raw = JSON.parse(data) as Record<string, unknown>
 
-    // Normalize toolName field
-    if (raw.type === 'tool_use' && 'name' in raw && !('toolName' in raw)) {
-      raw.toolName = raw.name
-      delete raw.name
+    // Normalize backend field names to frontend format
+    if (raw.type === 'text_delta') {
+      // Backend: delta -> Frontend: content
+      if ('delta' in raw && !('content' in raw)) {
+        raw.content = raw.delta
+        delete raw.delta
+      }
+    }
+
+    if (raw.type === 'tool_use') {
+      // Backend: toolUseId -> Frontend: toolCallId
+      if ('toolUseId' in raw && !('toolCallId' in raw)) {
+        raw.toolCallId = raw.toolUseId
+        delete raw.toolUseId
+      }
+      // Backend: argsJson -> Frontend: args (parse JSON string)
+      if ('argsJson' in raw && !('args' in raw)) {
+        try {
+          raw.args = JSON.parse(raw.argsJson as string)
+        } catch {
+          raw.args = {}
+        }
+        delete raw.argsJson
+      }
+      // Legacy: name -> toolName
+      if ('name' in raw && !('toolName' in raw)) {
+        raw.toolName = raw.name
+        delete raw.name
+      }
+    }
+
+    if (raw.type === 'tool_progress') {
+      // Backend: toolUseId -> Frontend: toolCallId
+      if ('toolUseId' in raw && !('toolCallId' in raw)) {
+        raw.toolCallId = raw.toolUseId
+        delete raw.toolUseId
+      }
+    }
+
+    if (raw.type === 'tool_result') {
+      // Backend: toolUseId -> Frontend: toolCallId
+      if ('toolUseId' in raw && !('toolCallId' in raw)) {
+        raw.toolCallId = raw.toolUseId
+        delete raw.toolUseId
+      }
+      // Backend: resultJson -> Frontend: result
+      if ('resultJson' in raw && !('result' in raw)) {
+        raw.result = raw.resultJson
+        delete raw.resultJson
+      }
+      // Backend: errorJson -> Frontend: error (for tool_result error case)
+      if ('errorJson' in raw && raw.errorJson && !('error' in raw)) {
+        raw.error = raw.errorJson
+        delete raw.errorJson
+      }
     }
 
     return raw as unknown as SseEvent

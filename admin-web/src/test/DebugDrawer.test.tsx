@@ -3,25 +3,21 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { DebugDrawer } from '../components/debug/DebugDrawer'
 import type { RuntimeState } from '../types'
 
-// Mock runtime state with various entry types
+// Mock runtime state matching backend AdminRuntimeStateDto format
+// Backend returns entries with short keys: meta, queue, tools, leases, children, todos, todo-reminder
 const mockRuntimeState: RuntimeState = {
   runId: 'run-001-abc',
   activeRun: true,
   entries: {
-    'agent:run:run-001-abc:meta': { status: 'RUNNING', userId: 'demo' },
-    'agent:run:run-001-abc:queue': ['tc-001', 'tc-002'],
-    'agent:run:run-001-abc:tools:tc-001': { status: 'WAITING', toolName: 'query_order' },
-    'agent:run:run-001-abc:lease:tc-001': { leaseHolder: 'instance-1', expireAt: 1234567890 },
-    'agent:run:run-001-abc:control': { abort_requested: false },
-    'abort_requested': false,
-    'interrupt_requested': true,
-    'agent:run:run-001-abc:children': ['run-002-sub'],
-    'agent:run:run-001-abc:todos': ['todo-001', 'todo-002'],
-    'todo-reminder': 'Check pending todos',
-    // Should NOT appear in full set
-    'agent:active-runs': 'run-001,run-002,run-003',
-    // Sensitive field that should be redacted
-    'confirmToken': 'secret-confirm-token-abc123',
+    meta: { status: 'RUNNING', userId: 'demo' },
+    queue: { 'tc-001': '1700000000', 'tc-002': '1700000001' },
+    tools: { 'tc-001': '{"status":"WAITING","toolName":"query_order"}', 'tc-002': '{"status":"PENDING"}' },
+    leases: { 'tc-001': '1700000000' },
+    children: { 'run-002-sub': '{"ref":"sub-agent"}' },
+    todos: { 'step_1': '{"title":"Query order"}', 'step_2': '{"title":"Cancel order"}' },
+    'todo-reminder': '{"turnNo":6,"steps":[]}',
+    // Sensitive field in meta that should be redacted
+    other: { confirmToken: 'secret-confirm-token-abc123' },
   },
 }
 
@@ -65,7 +61,8 @@ describe('DebugDrawer', () => {
   it('should display Meta group', () => {
     render(<DebugDrawer runtimeState={mockRuntimeState} loading={false} error={null} onClose={() => {}} />)
     expect(screen.getByText('Meta')).toBeInTheDocument()
-    expect(screen.getByText(/agent:run:run-001-abc:meta/)).toBeInTheDocument()
+    // EntryGroup renders key with colon suffix
+    expect(screen.getByText(/status:/)).toBeInTheDocument()
   })
 
   it('should display Queue group', () => {
@@ -83,11 +80,6 @@ describe('DebugDrawer', () => {
     expect(screen.getByText('Leases')).toBeInTheDocument()
   })
 
-  it('should display Control group', () => {
-    render(<DebugDrawer runtimeState={mockRuntimeState} loading={false} error={null} onClose={() => {}} />)
-    expect(screen.getByText('Control')).toBeInTheDocument()
-  })
-
   it('should display Children group', () => {
     render(<DebugDrawer runtimeState={mockRuntimeState} loading={false} error={null} onClose={() => {}} />)
     expect(screen.getByText('Children')).toBeInTheDocument()
@@ -96,20 +88,13 @@ describe('DebugDrawer', () => {
   it('should display Todos group', () => {
     render(<DebugDrawer runtimeState={mockRuntimeState} loading={false} error={null} onClose={() => {}} />)
     expect(screen.getByText('Todos')).toBeInTheDocument()
-    expect(screen.getByText(/todo-reminder/)).toBeInTheDocument()
+    expect(screen.getByText('Todo Reminder')).toBeInTheDocument()
   })
 
-  it('should NOT display full agent:active-runs set', () => {
+  it('should NOT display confirmToken in Other group (redacted)', () => {
     render(<DebugDrawer runtimeState={mockRuntimeState} loading={false} error={null} onClose={() => {}} />)
-    // The agent:active-runs entry exists but should not be displayed (it's not grouped)
-    expect(screen.queryByText(/run-001,run-002,run-003/)).not.toBeInTheDocument()
-  })
-
-  it('should not display confirmToken (ungrouped sensitive field)', () => {
-    render(<DebugDrawer runtimeState={mockRuntimeState} loading={false} error={null} onClose={() => {}} />)
-    // confirmToken doesn't match any group pattern, so it's not displayed at all
+    // confirmToken in other group should be redacted
     expect(screen.queryByText('secret-confirm-token-abc123')).not.toBeInTheDocument()
-    expect(screen.queryByText('confirmToken')).not.toBeInTheDocument()
   })
 
   it('should call onClose when close button clicked', () => {

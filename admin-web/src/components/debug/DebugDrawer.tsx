@@ -45,32 +45,24 @@ export function DebugDrawer({ runtimeState, loading, error, onClose }: DebugDraw
     return null
   }
 
-  // Extract entries by category (based on typical Redis key structure)
+  // Extract entries by category (backend returns short keys: meta, queue, tools, etc.)
   const entries = runtimeState?.entries || {}
-  const meta: Record<string, unknown> = {}
-  const queue: Record<string, unknown> = {}
-  const tools: Record<string, unknown> = {}
-  const leases: Record<string, unknown> = {}
-  const control: Record<string, unknown> = {}
-  const children: Record<string, unknown> = {}
-  const todos: Record<string, unknown> = {}
 
-  // Group entries by key prefix
+  // Backend AdminRuntimeStateDto returns entries with short keys
+  const meta = (entries.meta as Record<string, unknown>) || {}
+  const queue = (entries.queue as Record<string, unknown>) || {}
+  const tools = (entries.tools as Record<string, unknown>) || {}
+  const leases = (entries.leases as Record<string, unknown>) || {}
+  const children = (entries.children as Record<string, unknown>) || {}
+  const todos = (entries.todos as Record<string, unknown>) || {}
+  const todoReminder = (entries['todo-reminder'] as string) || null
+
+  // Group any remaining unrecognized keys
+  const other: Record<string, unknown> = {}
+  const knownKeys = ['meta', 'queue', 'tools', 'leases', 'children', 'todos', 'todo-reminder']
   for (const [key, value] of Object.entries(entries)) {
-    if (key.includes(':meta')) {
-      meta[key] = value
-    } else if (key.includes(':queue')) {
-      queue[key] = value
-    } else if (key.includes(':tools')) {
-      tools[key] = value
-    } else if (key.includes(':lease')) {
-      leases[key] = value
-    } else if (key.includes(':control') || key.includes('abort_requested') || key.includes('interrupt_requested')) {
-      control[key] = value
-    } else if (key.includes(':children')) {
-      children[key] = value
-    } else if (key.includes(':todos') || key.includes('todo-reminder')) {
-      todos[key] = value
+    if (!knownKeys.includes(key)) {
+      other[key] = value
     }
   }
 
@@ -107,9 +99,17 @@ export function DebugDrawer({ runtimeState, loading, error, onClose }: DebugDraw
             <EntryGroup title="Queue" entries={queue} />
             <EntryGroup title="Tools" entries={tools} />
             <EntryGroup title="Leases" entries={leases} />
-            <EntryGroup title="Control" entries={control} />
             <EntryGroup title="Children" entries={children} />
             <EntryGroup title="Todos" entries={todos} />
+            {todoReminder && (
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">Todo Reminder</h3>
+                <div className="bg-gray-50 rounded p-2">
+                  <pre className="text-xs text-gray-800 whitespace-pre-wrap">{todoReminder}</pre>
+                </div>
+              </div>
+            )}
+            <EntryGroup title="Other" entries={other} />
           </>
         )}
       </div>

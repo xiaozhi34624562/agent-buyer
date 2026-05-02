@@ -29,7 +29,11 @@ describe('agentApi', () => {
     mockFetch.mockResolvedValue(new Response(null, { status: 200 }))
 
     const api = createAgentApi({ userId: 'test-user' })
-    await api.createRun({ prompt: 'hello' })
+    await api.createRun({
+      messages: [{ role: 'user', content: 'hello' }],
+      allowedToolNames: ['query_order'],
+      llmParams: { model: 'deepseek-reasoner', temperature: 0.2, maxTokens: 256 },
+    })
 
     const options = mockFetch.mock.calls[0][1]
     expect(options?.headers).toHaveProperty('X-User-Id', 'test-user')
