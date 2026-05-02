@@ -28,7 +28,7 @@ export function Toolbar({
   return (
     <div className="flex items-center gap-2">
       {/* User ID display */}
-      <span className="text-sm text-gray-300">
+      <span className="text-sm text-white/80">
         User: {userId || 'unknown'}
       </span>
 

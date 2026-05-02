@@ -47,9 +47,9 @@ export function ConsoleShell({
   ]
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Header */}
-      <header className="bg-gray-800 text-white px-4 py-3 flex items-center justify-between">
+      <header className="bg-blue-600 text-white px-4 py-3 flex items-center justify-between shadow-sm">
         <h1 className="text-lg font-bold">Agent Buyer Console</h1>
         <Toolbar
           userId={userId}
