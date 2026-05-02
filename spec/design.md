@@ -370,7 +370,7 @@ event: text_delta
 data: {"attemptId":"att_1","delta":"我先帮你查询昨天的订单。"}
 
 event: tool_use
-data: {"toolUseId":"call_1","name":"query_order","args":{"date":"yesterday"}}
+data: {"toolUseId":"call_1","toolName":"query_order","args":{"date":"yesterday"}}
 
 event: tool_progress
 data: {"toolCallId":"tc_1","stage":"querying","message":"正在查询订单","percent":40}
@@ -2929,7 +2929,8 @@ agent:
 规则：
 
 - `enabled=false` 返回 503。
-- `token` 为空时允许本地 demo 访问。
+- `token` 为空时只允许 local/demo profile 访问。
+- 非 local/demo profile 下，必须配置 token 或禁用 admin endpoint，否则启动或请求阶段 fail closed。
 - `token` 非空时必须校验 `X-Admin-Token`。
 
 Run list endpoint：
@@ -3002,6 +3003,13 @@ error
 ping
 ```
 
+字段约束：
+
+```text
+tool_use payload 使用 toolName，不使用 name
+历史实现如果曾返回 name，前端可以兼容读取，但后端 V3 规范输出必须统一为 toolName
+```
+
 事件处理：
 
 | Event | 前端效果 |
@@ -3063,7 +3071,6 @@ Composer placeholder -> "补充订单号、说明或下一步指令..."
 Runtime state 只允许读取以下 Redis key：
 
 ```text
-agent:active-runs
 agent:{run:<runId>}:meta
 agent:{run:<runId>}:queue
 agent:{run:<runId>}:tools
@@ -3077,13 +3084,24 @@ agent:{run:<runId>}:todos
 agent:{run:<runId>}:todo-reminder
 ```
 
+`agent:active-runs` 是例外：后端可以读取它来计算当前 run 是否活跃，但只能把结果返回为 `activeRun: true/false`，不能把完整 active run set 放进 `entries`。
+
 明确禁止：
 
 - 读取 `confirm-tokens`
+- 返回完整 `agent:active-runs` set
 - wildcard scan
 - 用户输入任意 Redis key
 - 将 Redis key 放入 path variable
 - 返回 provider raw diagnostic payload
+- 返回原始 `confirmToken`
+
+`confirmToken` 脱敏策略：
+
+- 后端 Console DTO 层统一移除或 mask `confirmToken`
+- 覆盖 tool call args、tool result、event payload、runtime state value
+- 前端渲染层做兜底 redaction，防止历史数据或异常 payload 泄露 token
+- 测试 fixture 必须包含 `confirmToken`，验证页面不展示原值
 
 展示分组：
 
@@ -3092,7 +3110,7 @@ Control: meta, continuation-lock, control, llm-call-budget
 Tool Runtime: queue, tools, tool-use-ids, leases
 Planning: todos, todo-reminder
 SubAgent: children
-Active: active-runs
+Active: activeRun boolean
 ```
 
 ### 12.6 V3 配置
@@ -3129,6 +3147,14 @@ cd admin-web && npm run dev
 - `AdminRuntimeStateServiceTest`
 - `AdminConsoleControllerTest`
 
+后端测试必须覆盖：
+
+- local/demo profile 允许空 admin token
+- 非 local/demo profile 下空 admin token fail closed 或 admin endpoint disabled
+- runtime-state 不返回 `confirm-tokens`
+- runtime-state 不返回完整 `agent:active-runs` set，只返回 `activeRun` 布尔值
+- tool call args、tool result、event payload 中的 `confirmToken` 被移除或 mask
+
 前端测试：
 
 - `sseParser.test.ts`
@@ -3138,6 +3164,12 @@ cd admin-web && npm run dev
 - `useChatStream.test.tsx`
 - `ChatPanel.test.tsx`
 - `App.integration.test.tsx`
+
+前端测试必须覆盖：
+
+- `tool_use` 使用 `toolName` 字段渲染
+- 历史 payload 只有 `name` 时可兼容显示，但新请求状态使用 `toolName`
+- runtime state / timeline / SSE log 中出现 `confirmToken` 时不展示原始 token
 
 最终验证：
 
@@ -3158,7 +3190,7 @@ chat 可发送 prompt 并收到 SSE final
 
 ## 13. 后续演进
 
-V2 之后再考虑：
+V2/V3 之后再考虑：
 
 - Redis key 级 `generation` 隔离
 - 完整幂等恢复 / outbox

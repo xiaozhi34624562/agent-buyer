@@ -995,12 +995,35 @@ V2 明确不做：
 - 完整 outbox 幂等恢复
 - Redis key 级 `generation` 隔离，除非 provider fallback 实现中发现 replay 污染风险必须处理
 
+V3 必须交付：
+
+- Agent Buyer Console：本地可演示、可调试的 agent lifecycle 观察台
+- `admin-web` 前端工程：Run List、Run Timeline、Chat / Controls、Debug Drawer
+- 复用现有 `/api/agent/*` 完成 create run、continuation、trajectory、abort、interrupt
+- 新增最小 Admin Console API：`GET /api/admin/console/runs` 与 `GET /api/admin/console/runs/{runId}/runtime-state`
+- Run List 支持 status、userId、分页筛选，并展示 provider/model、parent link、turnNo、updatedAt
+- Timeline 合并展示 messages、llm attempts、tool calls、tool results、tool progress、events、compactions
+- Chat 支持 POST SSE、HITL 确认/拒绝、`PAUSED + user_input` continuation、interrupt、abort
+- Runtime State 只展示当前 run 的固定 Redis key 安全投影
+- Debug Drawer 展示 SSE event log 与当前 run runtime state
+- README 与本地启动脚本支持 reviewer 快速跑通 console demo
+
+V3 明确不做：
+
+- 不做通用 MySQL table browser
+- 不做任意 Redis key browser
+- 不新增 `/api/admin/chat`
+- 不实现生产级多租户 admin RBAC
+- 不暴露原始 `confirmToken`、provider raw payload、secret 或完整未脱敏大 tool result
+- 不把 `agent:active-runs` 的完整 set 返回给前端；后端只可读取它来计算当前 run 的 `activeRun` 布尔值
+
 更远演进：
 
 - generation 隔离
 - 完整幂等恢复 / outbox
 - MQ worker 解耦
 - 大结果对象存储 spill
+- V3 后续可独立演进 admin-inspector，但必须与 Agent Console 分离，避免把 demo console 做成高风险通用运维后台
 
 ## 16. 测试场景
 
@@ -1112,7 +1135,7 @@ event: text_delta
 data: {"attemptId":"att_1","delta":"我先帮你查询昨天的订单..."}
 
 event: tool_use
-data: {"toolUseId":"call_1","name":"query_order","args":{"date":"yesterday"}}
+data: {"toolUseId":"call_1","toolName":"query_order","args":{"date":"yesterday"}}
 
 event: tool_progress
 data: {"toolCallId":"tc_1","stage":"querying","message":"正在查询订单","percent":40}
@@ -1708,7 +1731,7 @@ X-User-Id: <selected userId>
 X-Admin-Token: <optional token>
 ```
 
-当 `agent.admin.token` 为空时，本地 demo 允许访问 admin endpoint；当 token 非空时，必须校验 `X-Admin-Token`。
+当 `agent.admin.token` 为空时，只允许在 local/demo profile 访问 admin endpoint；非 local/demo profile 必须配置 token 或禁用 admin endpoint。当 token 非空时，必须校验 `X-Admin-Token`。
 
 ### B.3 V3 前端能力
 
@@ -1796,6 +1819,7 @@ SSE 解析要求：
 - Chat 使用 POST，因此不能用浏览器 `EventSource`
 - 前端必须用 `fetch + ReadableStream` 解析 SSE
 - 必须支持 split chunk、单 chunk 多 event、`ping` event、非法 JSON error event
+- `tool_use` payload 规范字段为 `toolName`，不是 `name`；如果历史实现仍返回 `name`，前端可以兼容读取，但后端 V3 规范输出必须统一为 `toolName`
 
 ### B.4 V3 后端 Console API
 
@@ -1841,10 +1865,11 @@ pageSize max = 100
 - 只允许 `status` 和 `userId` 两个过滤条件
 - 不允许动态表名、动态排序字段或自由 SQL
 
-`GET /api/admin/console/runs/{runId}/runtime-state` 只允许读取：
+`GET /api/admin/console/runs/{runId}/runtime-state` 返回当前 run 的 runtime state。后端可以读取 `agent:active-runs` 判断当前 run 是否活跃，但只能把判断结果返回为 `activeRun: true/false`，不能把完整 active run set 放进 `entries`。
+
+`entries` 只允许包含：
 
 ```text
-agent:active-runs
 agent:{run:<runId>}:meta
 agent:{run:<runId>}:queue
 agent:{run:<runId>}:tools
@@ -1861,6 +1886,7 @@ agent:{run:<runId>}:todo-reminder
 禁止：
 
 - 读取 `confirm-tokens`
+- 返回 `agent:active-runs` 的完整 set
 - wildcard scan Redis
 - 让用户传入任意 Redis key
 - 返回 provider raw diagnostic payload
@@ -1873,8 +1899,11 @@ V3 必须遵守：
 - 不做任意 Redis key browser
 - 不新增 `/api/admin/chat`
 - 不展示原始 `confirmToken`
+- 后端 Console DTO 层必须统一移除或 mask `confirmToken`，覆盖 tool call args、tool result、event payload、runtime state 等所有可能来源
+- 前端渲染层必须做兜底 redaction，避免历史数据或异常 payload 把 `confirmToken` 展示出来
 - 不在日志、debug panel、SSE log 中打印 admin token 或 provider key
 - Runtime state 只能是当前 run 的固定 key 投影
+- Runtime state 不能返回完整 `agent:active-runs` set，只能返回当前 run 的 `activeRun` 布尔值
 - Trajectory 继续使用已有安全 DTO 和脱敏策略
 - terminal run 禁用 interrupt / abort 按钮
 
@@ -1892,8 +1921,9 @@ V3 视觉与交互约束：
 后端测试必须覆盖：
 
 - `AdminAccessGuard`：token blank / match / mismatch / disabled
+- `AdminAccessGuard`：非 local/demo profile 下 token 为空时必须 fail closed 或禁用 admin endpoint
 - `AdminRunListService`：分页、过滤、排序、join `agent_run_context`
-- `AdminRuntimeStateService`：只读固定 Redis key，不包含 `confirm-tokens`
+- `AdminRuntimeStateService`：只读固定 Redis key，不包含 `confirm-tokens`，不返回完整 `agent:active-runs` set
 - `AdminConsoleController`：正常响应与 400 / 403 / 503 异常映射
 
 前端测试必须覆盖：
@@ -1902,9 +1932,11 @@ V3 视觉与交互约束：
 - `RunListPanel`：loading、empty、error、data
 - `TimelinePanel`：message、attempt、tool、event、compaction 都可渲染
 - `RuntimeStateView`：缺失 key 可渲染，不显示 confirm token
+- `RuntimeStateView`：即使后端或 fixture 中出现 `confirmToken` 字段，也必须 mask 或隐藏
 - `useChatStream`：happy path、HITL、PAUSED user input、error event
 - `ChatPanel`：create、continue、confirm、reject、interrupt、abort
 - `App.integration`：run list、timeline、chat、runtime state 串联
+- `App.integration`：tool call args、tool result、event payload 中含 `confirmToken` 时，页面不展示原始 token
 
 最终验收命令：
 
