@@ -117,6 +117,7 @@ describe('useChatMessages', () => {
           value: new TextEncoder().encode(`data:${JSON.stringify(mockEvent)}\n`),
         })
         .mockResolvedValueOnce({ done: true, value: undefined }),
+      releaseLock: vi.fn(),
     }
 
     mockFetch.mockResolvedValueOnce({
@@ -200,7 +201,7 @@ describe('useChatMessages', () => {
     expect(result.current.messages).toHaveLength(0)
   })
 
-  it('should skip ping events in stream', async () => {
+  it('should pass ping events to onEvent (handled by caller)', async () => {
     const onEvent = vi.fn()
 
     const mockReader = {
@@ -210,6 +211,7 @@ describe('useChatMessages', () => {
           value: new TextEncoder().encode('data:ping\n'),
         })
         .mockResolvedValueOnce({ done: true, value: undefined }),
+      releaseLock: vi.fn(),
     }
 
     mockFetch.mockResolvedValueOnce({
@@ -223,7 +225,7 @@ describe('useChatMessages', () => {
       await result.current.sendMessage('run-001', 'test')
     })
 
-    // ping should not trigger onEvent
-    expect(onEvent).not.toHaveBeenCalled()
+    // ping events are passed to onEvent, caller handles them (e.g., add to debugEvents)
+    expect(onEvent).toHaveBeenCalledWith({ type: 'ping' })
   })
 })
