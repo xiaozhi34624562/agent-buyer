@@ -223,6 +223,7 @@ public final class ToolCallCoordinator {
                 Tool tool = resolveAllowedTool(raw.name(), allowedToolsByCanonicalName);
                 ToolValidation validation = tool.validate(new ToolUseContext(runId, userId), new ToolUse(raw.toolUseId(), raw.name(), raw.argsJson()));
                 if (validation.accepted()) {
+                    String normalizedArgsJson = requireValidArgsJson(validation.normalizedArgsJson());
                     call = new ToolCall(
                             runId,
                             toolCallId,
@@ -230,7 +231,7 @@ public final class ToolCallCoordinator {
                             raw.toolUseId(),
                             raw.name(),
                             tool.schema().name(),
-                            validation.normalizedArgsJson(),
+                            normalizedArgsJson,
                             tool.schema().isConcurrent(),
                             tool.schema().idempotent(),
                             false,
@@ -238,8 +239,9 @@ public final class ToolCallCoordinator {
                             tool.schema().timeout().toMillis()
                     );
                     executable.add(call);
-                    assistantToolCalls.add(new ToolCallMessage(raw.toolUseId(), tool.schema().name(), validation.normalizedArgsJson()));
+                    assistantToolCalls.add(new ToolCallMessage(raw.toolUseId(), tool.schema().name(), normalizedArgsJson));
                 } else {
+                    String safeArgsJson = safeArgsJsonForTrace(raw.argsJson(), raw.toolUseId());
                     call = new ToolCall(
                             runId,
                             toolCallId,
@@ -247,7 +249,7 @@ public final class ToolCallCoordinator {
                             raw.toolUseId(),
                             raw.name(),
                             tool.schema().name(),
-                            raw.argsJson(),
+                            safeArgsJson,
                             tool.schema().isConcurrent(),
                             tool.schema().idempotent(),
                             true,
@@ -255,10 +257,11 @@ public final class ToolCallCoordinator {
                             tool.schema().timeout().toMillis()
                     );
                     precheckFailed.add(call);
-                    assistantToolCalls.add(new ToolCallMessage(raw.toolUseId(), tool.schema().name(), raw.argsJson()));
+                    assistantToolCalls.add(new ToolCallMessage(raw.toolUseId(), tool.schema().name(), safeArgsJson));
                 }
             } catch (Exception e) {
                 log.warn("tool call rejected before execution rawToolName={} toolUseId={} error={}", raw.name(), raw.toolUseId(), e.getMessage());
+                String safeArgsJson = safeArgsJsonForTrace(raw.argsJson(), raw.toolUseId());
                 call = new ToolCall(
                         runId,
                         toolCallId,
@@ -266,14 +269,14 @@ public final class ToolCallCoordinator {
                         raw.toolUseId(),
                         raw.name(),
                         raw.name(),
-                        raw.argsJson(),
+                        safeArgsJson,
                         false,
                         false,
                         true,
                         errorJson("unknown_or_invalid_tool", e.getMessage())
                 );
                 precheckFailed.add(call);
-                assistantToolCalls.add(raw);
+                assistantToolCalls.add(new ToolCallMessage(raw.toolUseId(), raw.name(), safeArgsJson));
             }
             allCalls.add(call);
         }
@@ -283,6 +286,29 @@ public final class ToolCallCoordinator {
                 allCalls
         );
         return new ToolCommit(allCalls, executable, precheckFailed);
+    }
+
+    private String requireValidArgsJson(String argsJson) {
+        String candidate = argsJson == null || argsJson.isBlank() ? "{}" : argsJson;
+        try {
+            objectMapper.readTree(candidate);
+            return candidate;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("tool arguments are not valid JSON");
+        }
+    }
+
+    private String safeArgsJsonForTrace(String argsJson, String toolUseId) {
+        if (argsJson == null || argsJson.isBlank()) {
+            return "{}";
+        }
+        try {
+            objectMapper.readTree(argsJson);
+            return argsJson;
+        } catch (Exception e) {
+            log.warn("malformed tool arguments replaced with empty JSON for trace toolUseId={}", toolUseId);
+            return "{}";
+        }
     }
 
     private Tool resolveAllowedTool(String rawName, Map<String, Tool> allowedToolsByCanonicalName) {

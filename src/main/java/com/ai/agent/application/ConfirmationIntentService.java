@@ -67,7 +67,13 @@ public final class ConfirmationIntentService {
                 || value.equals("please go ahead")
                 || value.equals("confirm it")
                 || value.equals("looks good")
-                || value.equals("no problem, cancel it");
+                || value.equals("no problem, cancel it")
+                || isContextualChineseConfirmation(value);
+    }
+
+    private boolean isContextualChineseConfirmation(String value) {
+        return (value.contains("没问题") || value.contains("可以") || value.contains("同意"))
+                && (value.contains("继续") || value.contains("处理") || value.contains("执行") || value.contains("取消"));
     }
 
     private boolean isExplicitReject(String value) {

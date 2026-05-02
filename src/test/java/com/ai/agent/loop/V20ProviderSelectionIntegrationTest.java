@@ -40,6 +40,7 @@ import com.ai.agent.tool.runtime.ToolRuntime;
 import com.ai.agent.tool.runtime.redis.RedisKeys;
 import com.ai.agent.tool.runtime.redis.RedisToolStore;
 import com.ai.agent.tool.security.ConfirmTokenStore;
+import com.ai.agent.tool.security.PendingConfirmToolStore;
 import com.ai.agent.trajectory.model.RunContext;
 import com.ai.agent.trajectory.port.RunContextStore;
 import com.ai.agent.trajectory.port.TrajectoryReader;
@@ -68,6 +69,7 @@ import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.data.redis.core.script.RedisScript;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 class V20ProviderSelectionIntegrationTest {
     @Test
@@ -107,6 +109,7 @@ class V20ProviderSelectionIntegrationTest {
                 new ContinuationLockService(new RedisKeys(properties), redisTemplate),
                 new FakeRedisToolStore()
         );
+        PendingConfirmToolStore pendingConfirmToolStore = mock(PendingConfirmToolStore.class);
         DefaultAgentLoop loop = new DefaultAgentLoop(
                 properties,
                 new PromptAssembler(userId -> new UserProfile(userId, "Owner", null, null, null, "buyer")),
@@ -121,7 +124,8 @@ class V20ProviderSelectionIntegrationTest {
                         (ignoredRunId, ignoredUserId, ignoredRunContext, ignoredMessage) ->
                                 HumanIntentResolver.ConfirmationDecision.confirm(0.99, "test")
                 ),
-                new ConfirmTokenStore(properties, redisTemplate, objectMapper)
+                new ConfirmTokenStore(properties, redisTemplate, objectMapper),
+                pendingConfirmToolStore
         );
 
         AgentRunResult result = loop.continueRun(
@@ -182,6 +186,7 @@ class V20ProviderSelectionIntegrationTest {
                         trajectoryStore,
                         trajectoryStore,
                         new ToolResultCloser(trajectoryStore, trajectoryStore, TestObjectProvider.empty()),
+                        mock(PendingConfirmToolStore.class),
                         objectMapper
                 ),
                 trajectoryStore,

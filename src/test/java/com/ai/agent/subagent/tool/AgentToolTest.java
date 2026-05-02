@@ -34,7 +34,7 @@ class AgentToolTest {
 
     @Test
     void schemaDeclaresAgentToolAsHighCostNonConcurrentTool() {
-        AgentTool tool = new AgentTool(new PiiMasker(objectMapper), objectMapper);
+        AgentTool tool = toolWithoutRunner();
 
         ToolSchema schema = tool.schema();
         AgentProperties properties = new AgentProperties();
@@ -50,7 +50,7 @@ class AgentToolTest {
 
     @Test
     void validatesRequiredTaskPackage() {
-        AgentTool tool = new AgentTool(new PiiMasker(objectMapper), objectMapper);
+        AgentTool tool = toolWithoutRunner();
 
         ToolValidation missingTask = tool.validate(
                 new ToolUseContext("run-1", "user-1"),
@@ -68,7 +68,7 @@ class AgentToolTest {
 
     @Test
     void runFailsClosedBeforeSubAgentRunnerIsWired() throws Exception {
-        AgentTool tool = new AgentTool(new PiiMasker(objectMapper), objectMapper);
+        AgentTool tool = toolWithoutRunner();
         ToolCall call = new ToolCall(
                 "run-1",
                 "tc-1",
@@ -115,7 +115,8 @@ class AgentToolTest {
                                 false
                         );
                     }
-                })
+                }),
+                new AgentProperties()
         );
         ToolCall call = new ToolCall(
                 "run-1",
@@ -153,7 +154,8 @@ class AgentToolTest {
                         RunStatus.TIMEOUT,
                         "SubAgent did not finish within the wait timeout.",
                         true
-                ))
+                )),
+                new AgentProperties()
         );
         ToolCall call = new ToolCall(
                 "run-1",
@@ -204,6 +206,15 @@ class AgentToolTest {
                 return value;
             }
         };
+    }
+
+    private AgentTool toolWithoutRunner() {
+        return new AgentTool(
+                new PiiMasker(objectMapper),
+                objectMapper,
+                provider(null),
+                new AgentProperties()
+        );
     }
 
     private static final class NoopSink implements com.ai.agent.web.sse.AgentEventSink {

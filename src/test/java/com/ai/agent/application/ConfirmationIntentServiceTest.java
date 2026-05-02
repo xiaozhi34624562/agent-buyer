@@ -17,6 +17,7 @@ class ConfirmationIntentServiceTest {
         assertThat(service.classify("确认取消")).isEqualTo(CONFIRM);
         assertThat(service.classify("确认取消这个订单")).isEqualTo(CONFIRM);
         assertThat(service.classify("请确认取消这笔订单")).isEqualTo(CONFIRM);
+        assertThat(service.classify("没问题，按刚才的取消方案继续处理")).isEqualTo(CONFIRM);
     }
 
     @Test

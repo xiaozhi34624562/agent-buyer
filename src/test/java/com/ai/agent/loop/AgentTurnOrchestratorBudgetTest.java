@@ -40,6 +40,7 @@ import com.ai.agent.tool.runtime.ToolResultCloser;
 import com.ai.agent.tool.runtime.ToolResultWaiter;
 import com.ai.agent.tool.runtime.ToolRuntime;
 import com.ai.agent.tool.runtime.redis.RedisToolStore;
+import com.ai.agent.tool.security.PendingConfirmToolStore;
 import com.ai.agent.trajectory.model.ContextCompactionRecord;
 import com.ai.agent.trajectory.model.RunContext;
 import com.ai.agent.trajectory.port.ContextCompactionStore;
@@ -68,6 +69,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 class AgentTurnOrchestratorBudgetTest {
     @TempDir
@@ -500,6 +502,7 @@ class AgentTurnOrchestratorBudgetTest {
                         trajectoryStore,
                         trajectoryStore,
                         new ToolResultCloser(trajectoryStore, trajectoryStore, TestObjectProvider.empty()),
+                        mock(PendingConfirmToolStore.class),
                         objectMapper
                 ),
                 trajectoryStore,

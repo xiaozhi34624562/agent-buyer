@@ -25,6 +25,7 @@ import com.ai.agent.tool.runtime.ToolResultWaiter;
 import com.ai.agent.tool.runtime.ToolRuntime;
 import com.ai.agent.tool.runtime.redis.RedisToolStore;
 import com.ai.agent.tool.security.ConfirmTokenStore;
+import com.ai.agent.tool.security.PendingConfirmToolStore;
 import com.ai.agent.trajectory.port.RunContextStore;
 import com.ai.agent.trajectory.port.TrajectoryReader;
 import com.ai.agent.trajectory.port.TrajectoryStore;
@@ -33,6 +34,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import static org.mockito.Mockito.mock;
 
 public final class AgentLoopTestFactory {
     private AgentLoopTestFactory() {
@@ -55,6 +58,7 @@ public final class AgentLoopTestFactory {
             ConfirmTokenStore confirmTokenStore,
             ObjectMapper objectMapper
     ) {
+        PendingConfirmToolStore pendingConfirmToolStore = mock(PendingConfirmToolStore.class);
         AgentTurnOrchestrator turnOrchestrator = new AgentTurnOrchestrator(
                 properties,
                 new ContextViewBuilder(
@@ -84,6 +88,7 @@ public final class AgentLoopTestFactory {
                         trajectoryStore,
                         trajectoryReader,
                         new ToolResultCloser(trajectoryStore, trajectoryReader, TestObjectProvider.empty()),
+                        pendingConfirmToolStore,
                         objectMapper
                 ),
                 trajectoryReader,
@@ -105,7 +110,8 @@ public final class AgentLoopTestFactory {
                         (runId, userId, runContext, userMessage) ->
                                 HumanIntentResolver.ConfirmationDecision.clarify("请明确回复确认继续执行，或回复放弃本次操作。", "test")
                 ),
-                confirmTokenStore
+                confirmTokenStore,
+                pendingConfirmToolStore
         );
     }
 

@@ -1280,3 +1280,90 @@ Console 不做：
 ### 残余问题
 
 - Case 5 的 duplicate tool result (`call_01_7ZlkAE3rvy75ox8aEbYLNXnh`) 是 skill_view 工具的独立 bug，需要后续排查
+
+## 2026-05-02 Review Finding 修复：tool close / HITL / 测试构造器
+
+### 修复内容
+
+- 同步 `PendingConfirmToolStore` 新依赖到测试装配：
+  - `AgentLoopTestFactory`
+  - `AgentTurnOrchestratorBudgetTest`
+  - `V20ProviderSelectionIntegrationTest`
+- 修复 tool result 双 close 竞态：
+  - `ToolExecutionLauncher` 不再写 `agent_tool_result_trace` / `TOOL` message。
+  - launcher 只负责执行工具、`RedisToolStore.complete` CAS、发布 `ToolResultPubSub` 唤醒和 SSE progress。
+  - `ToolCallCoordinator` 仍是正常执行路径下唯一的 trajectory close 写入者。
+- 增强 HITL 语义确认：
+  - `ProviderSemanticConfirmationIntentClassifier` 从 `PendingConfirmToolStore` 读取 pending tool 上下文。
+  - classifier prompt 增加 `pendingToolName`、`pendingSummary`、脱敏后的 `pendingArgsJson`。
+  - `confirmToken` 在进入 LLM prompt 前移除。
+  - 规则分类补充“没问题，按刚才的取消方案继续处理”这类承接上文的明确确认。
+- 清理同类生产代码风险：
+  - 移除 `AgentTool` 中测试便利构造器。
+  - 测试侧显式传入 `ObjectProvider<SubAgentRunner>` 与 `AgentProperties`。
+
+### 新增/更新测试
+
+- `ConfirmationIntentServiceTest`
+  - 覆盖中文承接式确认短语。
+- `ProviderSemanticConfirmationIntentClassifierTest`
+  - 覆盖 provider prompt 包含 pending action context。
+  - 覆盖 `confirmToken` 不进入 prompt。
+- `ToolExecutionLauncherTest`
+  - 覆盖 launcher 只 complete Redis + publish Pub/Sub，不直接写 trajectory。
+- `AgentToolTest`
+  - 更新为显式测试装配，避免依赖生产便利构造器。
+
+### 验证结果
+
+- targeted：`MYSQL_PASSWORD=*** mvn -Dtest=com.ai.agent.application.ConfirmationIntentServiceTest,com.ai.agent.application.ProviderSemanticConfirmationIntentClassifierTest,com.ai.agent.tool.runtime.ToolExecutionLauncherTest,com.ai.agent.tool.runtime.ToolResultWaiterTest test`
+  - 13 tests，0 failures，0 errors，BUILD SUCCESS。
+- targeted：`MYSQL_PASSWORD=*** mvn -Dtest=com.ai.agent.subagent.tool.AgentToolTest,com.ai.agent.tool.runtime.ToolExecutionLauncherTest test`
+  - 6 tests，0 failures，0 errors，BUILD SUCCESS。
+- full backend clean：`MYSQL_PASSWORD=*** mvn clean test`
+  - 280 tests，0 failures，0 errors，BUILD SUCCESS。
+- frontend lint：`npm run lint`
+  - exit 0。
+- frontend test：`npm test -- --run`
+  - 12 files，162 tests，全部通过。
+- frontend build：`npm run build`
+  - `tsc -b && vite build` 成功。
+
+### 踩坑记录
+
+- 非 clean 的 Maven 运行会把构造器签名漂移表现成 `NoSuchMethodError`；真正的 CI 风险要用 `mvn clean test` 暴露。
+- tool terminal 的 Redis 状态和 trajectory close 必须明确单一写入者。launcher 和 loop 同时 close 时，safe 并发工具会把同一个 `tool_use_id` 写成重复 `TOOL` message，下一轮 provider replay 就会出现 orphan tool result。
+- Pub/Sub 不能和 trajectory close 强绑定。正确边界是：工具执行完成后发布 result notification 唤醒 waiter；trajectory close 仍由 agent loop 在拿到完整 terminal 集合后统一完成。
+- HITL 确认分类不能只看用户最新一句话。像“没问题，按刚才的取消方案继续处理”必须结合 pending tool 的摘要、toolName 和参数上下文，否则模型容易把承接上文的确认判成需要追问。
+- pending args 进入 LLM 前必须删除 `confirmToken`。服务端 token 是执行凭证，不是模型上下文。
+
+### 真实 E2E 中新增暴露的问题与修复
+
+- 第一次 10x 循环没有开始，原因是 zsh 中 `status` 是只读变量；循环脚本变量改为 `exit_code` 后重新执行。
+- 真实 E2E 第 4 次曾出现 `SUMMARY_COMPACT` 未触发：
+  - 根因：模型把多个 `skill_view` 和 `query_order` 合并在一个 assistant tool-call block 中，summary compactor 为保持 tool_use/tool_result 配对，不能拆开压缩该 block。
+  - 修复：E2E compact case 明确要求每轮最多一个 tool call，并降低测试环境 summary threshold/recent budget，使三种 compaction 在真实输出波动下稳定触发。
+- 真实 E2E 第 6 次暴露 malformed tool arguments：
+  - 现象：模型生成 `todo_write` 参数时返回非法 JSON，`agent_tool_call_trace.args_json` 是 MySQL JSON 列，导致插入失败并中断 SSE。
+  - 修复：`ToolCallCoordinator` 保证进入 trajectory/replay 的 `argsJson` 一定是合法 JSON；非法 args 转为 precheck failure，trace/replay 使用 `{}`，tool result error 反馈给模型自修复。
+  - 新增测试：`ToolCallCoordinatorMalformedArgsTest` 覆盖 malformed args 不再写坏 MySQL JSON 列。
+- 补充验证：
+  - targeted：`MYSQL_PASSWORD=*** mvn -Dtest=com.ai.agent.loop.ToolCallCoordinatorMalformedArgsTest,com.ai.agent.loop.ToolCallCoordinatorTimeoutTest,com.ai.agent.application.ConfirmationIntentServiceTest test`
+    - 8 tests，0 failures，0 errors，BUILD SUCCESS。
+- full backend clean：`MYSQL_PASSWORD=*** mvn clean test`
+  - 282 tests，0 failures，0 errors，BUILD SUCCESS。
+- real LLM E2E：`./scripts/real-llm-e2e.sh` 循环 6 次（DeepSeek + Qwen 真实 API）
+  - 6/6 通过。
+  - 每轮覆盖：订单取消 dry-run + confirm、ToDo create/write、AgentTool/SubAgent、interrupt -> PAUSED、slash skill + 三种 context compact、DeepSeek pre-stream failure -> Qwen fallback。
+  - artifacts 根目录：`/tmp/agent-buyer-real-llm-e2e-6x-20260502-154645`。
+
+### 最终验证补充
+
+- `ToolExecutionLauncher` 的 Pub/Sub / SSE progress notification 改为 best-effort：
+  - Redis CAS complete 成功后，即使 Pub/Sub 发布或 progress 发送失败，也不能把已经完成的工具执行反向判失败。
+  - 新增 `pubSubFailureDoesNotFailCompletedToolExecution` 单测覆盖。
+- latest full backend clean：`MYSQL_PASSWORD=*** mvn clean test`
+  - 282 tests，0 failures，0 errors，BUILD SUCCESS。
+- latest real LLM E2E：按用户要求“前六次都通过就停止”
+  - 6/6 通过，未继续追加到 10 次。
+  - artifacts 根目录：`/tmp/agent-buyer-real-llm-e2e-6x-20260502-154645`。

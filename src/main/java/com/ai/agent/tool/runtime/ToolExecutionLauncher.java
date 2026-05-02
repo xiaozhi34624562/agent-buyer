@@ -8,13 +8,7 @@ import com.ai.agent.tool.model.ToolTerminal;
 import com.ai.agent.tool.registry.ToolRegistry;
 import com.ai.agent.tool.runtime.redis.RedisToolStore;
 import com.ai.agent.trajectory.port.TrajectoryStore;
-import com.ai.agent.web.sse.AgentEventSink;
-import com.ai.agent.web.sse.ErrorEvent;
-import com.ai.agent.web.sse.FinalEvent;
-import com.ai.agent.web.sse.TextDeltaEvent;
 import com.ai.agent.web.sse.ToolProgressEvent;
-import com.ai.agent.web.sse.ToolResultEvent;
-import com.ai.agent.web.sse.ToolUseEvent;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -32,7 +26,7 @@ public final class ToolExecutionLauncher {
     private final RedisToolStore store;
     private final ToolRegistry toolRegistry;
     private final TrajectoryStore trajectoryStore;
-    private final ToolResultCloser toolResultCloser;
+    private final ToolResultPubSub toolResultPubSub;
     private final RunEventSinkRegistry sinkRegistry;
     private final ExecutorService toolExecutor;
 
@@ -40,14 +34,14 @@ public final class ToolExecutionLauncher {
             RedisToolStore store,
             ToolRegistry toolRegistry,
             TrajectoryStore trajectoryStore,
-            ToolResultCloser toolResultCloser,
+            ToolResultPubSub toolResultPubSub,
             RunEventSinkRegistry sinkRegistry,
             @Qualifier("toolExecutor") ExecutorService toolExecutor
     ) {
         this.store = store;
         this.toolRegistry = toolRegistry;
         this.trajectoryStore = trajectoryStore;
-        this.toolResultCloser = toolResultCloser;
+        this.toolResultPubSub = toolResultPubSub;
         this.sinkRegistry = sinkRegistry;
         this.toolExecutor = toolExecutor;
     }
@@ -79,7 +73,7 @@ public final class ToolExecutionLauncher {
                 "{\"type\":\"executor_rejected\"}"
         );
         if (store.complete(tool, terminal)) {
-            closeAndPublish(tool, terminal);
+            publishCompleted(tool);
         }
     }
 
@@ -116,7 +110,7 @@ public final class ToolExecutionLauncher {
             );
         }
         if (store.complete(started, terminal)) {
-            closeAndPublish(started, terminal);
+            publishCompleted(started);
             log.info(
                     "tool execution completed toolName={} toolUseId={} status={} synthetic={}",
                     started.call().toolName(),
@@ -135,13 +129,27 @@ public final class ToolExecutionLauncher {
         drainRun(started.call().runId());
     }
 
-    private void closeAndPublish(StartedTool started, ToolTerminal terminal) {
-        toolResultCloser.closeTerminal(
-                started.call().runId(),
-                started.call(),
-                terminal,
-                sinkRegistry.find(started.call().runId()).orElse(AgentEventSinkNoop.INSTANCE)
-        );
+    private void publishCompleted(StartedTool started) {
+        try {
+            toolResultPubSub.publish(started.call().runId(), started.call().toolCallId());
+        } catch (RuntimeException e) {
+            log.warn("failed to publish tool result notification runId={} toolCallId={} error={}",
+                    started.call().runId(), started.call().toolCallId(), e.getMessage());
+        }
+        sinkRegistry.find(started.call().runId()).ifPresent(sink -> {
+            try {
+                sink.onToolProgress(new ToolProgressEvent(
+                        started.call().runId(),
+                        started.call().toolCallId(),
+                        "completed",
+                        "工具执行完成，等待 agent loop 写入结果",
+                        100
+                ));
+            } catch (RuntimeException e) {
+                log.warn("failed to emit completed tool progress runId={} toolCallId={} error={}",
+                        started.call().runId(), started.call().toolCallId(), e.getMessage());
+            }
+        });
     }
 
     private void runWithMdc(Map<String, String> context, Runnable task) {

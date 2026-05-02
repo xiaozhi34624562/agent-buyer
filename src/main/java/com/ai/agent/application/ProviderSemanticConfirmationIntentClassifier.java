@@ -9,9 +9,11 @@ import com.ai.agent.llm.model.LlmStreamResult;
 import com.ai.agent.llm.model.LlmUsage;
 import com.ai.agent.llm.provider.LlmProviderAdapter;
 import com.ai.agent.llm.provider.LlmProviderAdapterRegistry;
+import com.ai.agent.tool.security.PendingConfirmToolStore;
 import com.ai.agent.trajectory.model.RunContext;
 import com.ai.agent.trajectory.port.TrajectoryStore;
 import com.ai.agent.util.Ids;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.LinkedHashMap;
@@ -45,15 +47,18 @@ public final class ProviderSemanticConfirmationIntentClassifier implements Seman
 
     private final LlmProviderAdapterRegistry providerRegistry;
     private final TrajectoryStore trajectoryStore;
+    private final PendingConfirmToolStore pendingConfirmToolStore;
     private final ObjectMapper objectMapper;
 
     public ProviderSemanticConfirmationIntentClassifier(
             LlmProviderAdapterRegistry providerRegistry,
             TrajectoryStore trajectoryStore,
+            PendingConfirmToolStore pendingConfirmToolStore,
             ObjectMapper objectMapper
     ) {
         this.providerRegistry = providerRegistry;
         this.trajectoryStore = trajectoryStore;
+        this.pendingConfirmToolStore = pendingConfirmToolStore;
         this.objectMapper = objectMapper;
     }
 
@@ -147,9 +152,54 @@ public final class ProviderSemanticConfirmationIntentClassifier implements Seman
                 userId: %s
                 runId: %s
                 pendingAction: A previous tool dry-run is waiting for human confirmation.
+                %s
                 latestUserMessage:
                 %s
-                """.formatted(userId, runContext.runId(), userMessage == null ? "" : userMessage).trim();
+                """.formatted(
+                userId,
+                runContext.runId(),
+                pendingActionContext(runContext.runId()),
+                userMessage == null ? "" : userMessage
+        ).trim();
+    }
+
+    private String pendingActionContext(String runId) {
+        if (pendingConfirmToolStore == null) {
+            return "pendingContext: unavailable";
+        }
+        try {
+            PendingConfirmToolStore.PendingConfirmTool pending = pendingConfirmToolStore.load(runId);
+            if (pending == null) {
+                return "pendingContext: unavailable";
+            }
+            return """
+                    pendingToolName: %s
+                    pendingSummary: %s
+                    pendingArgsJson: %s
+                    """.formatted(
+                    pending.toolName(),
+                    pending.summary() == null ? "" : pending.summary(),
+                    sanitizePendingArgs(pending.argsJson())
+            ).trim();
+        } catch (RuntimeException e) {
+            log.warn("failed to load pending confirmation context runId={} error={}", runId, e.getMessage());
+            return "pendingContext: unavailable";
+        }
+    }
+
+    private String sanitizePendingArgs(String argsJson) {
+        if (argsJson == null || argsJson.isBlank()) {
+            return "{}";
+        }
+        try {
+            JsonNode root = objectMapper.readTree(argsJson);
+            if (root instanceof ObjectNode objectNode) {
+                objectNode.remove("confirmToken");
+            }
+            return objectMapper.writeValueAsString(root);
+        } catch (Exception e) {
+            return "{}";
+        }
     }
 
     private ConfirmationDecision parseDecision(String content, String source) {

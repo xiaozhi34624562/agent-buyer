@@ -38,7 +38,7 @@ class HumanIntentResolverTest {
                 "run-1",
                 "user-1",
                 runContext("run-1"),
-                "没问题，就处理吧"
+                "听起来还行吧"
         );
 
         assertThat(decision.intent()).isEqualTo(ConfirmationIntent.CONFIRM);

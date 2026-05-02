@@ -12,6 +12,7 @@ import com.ai.agent.llm.provider.LlmProviderAdapterRegistry;
 import com.ai.agent.llm.provider.LlmStreamListener;
 import com.ai.agent.tool.model.ToolCall;
 import com.ai.agent.tool.model.ToolTerminal;
+import com.ai.agent.tool.security.PendingConfirmToolStore;
 import com.ai.agent.trajectory.model.RunContext;
 import com.ai.agent.trajectory.port.TrajectoryStore;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class ProviderSemanticConfirmationIntentClassifierTest {
     @Test
@@ -33,6 +35,7 @@ class ProviderSemanticConfirmationIntentClassifierTest {
         ProviderSemanticConfirmationIntentClassifier classifier = new ProviderSemanticConfirmationIntentClassifier(
                 new LlmProviderAdapterRegistry(List.of(provider)),
                 trajectoryStore,
+                mock(PendingConfirmToolStore.class),
                 new ObjectMapper()
         );
 
@@ -67,6 +70,7 @@ class ProviderSemanticConfirmationIntentClassifierTest {
         ProviderSemanticConfirmationIntentClassifier classifier = new ProviderSemanticConfirmationIntentClassifier(
                 new LlmProviderAdapterRegistry(List.of(provider)),
                 mock(TrajectoryStore.class),
+                mock(PendingConfirmToolStore.class),
                 new ObjectMapper()
         );
 
@@ -91,6 +95,7 @@ class ProviderSemanticConfirmationIntentClassifierTest {
         ProviderSemanticConfirmationIntentClassifier classifier = new ProviderSemanticConfirmationIntentClassifier(
                 new LlmProviderAdapterRegistry(List.of(primary, fallback)),
                 mock(TrajectoryStore.class),
+                mock(PendingConfirmToolStore.class),
                 new ObjectMapper()
         );
 
@@ -104,6 +109,44 @@ class ProviderSemanticConfirmationIntentClassifierTest {
         assertThat(decision.intent()).isEqualTo(ConfirmationIntent.REJECT);
         assertThat(primary.requests).hasSize(1);
         assertThat(fallback.requests).hasSize(1);
+    }
+
+    @Test
+    void providerPromptIncludesPendingActionContext() {
+        FakeProvider provider = new FakeProvider("deepseek", """
+                {"intent":"CONFIRM","confidence":0.91,"question":""}
+                """);
+        PendingConfirmToolStore pendingStore = mock(PendingConfirmToolStore.class);
+        when(pendingStore.load("run-1")).thenReturn(new PendingConfirmToolStore.PendingConfirmTool(
+                "tc-1",
+                "cancel_order",
+                "{\"orderId\":\"O-1001\",\"confirmToken\":\"secret-token\"}",
+                "secret-token",
+                "将取消订单 O-1001（Noise cancelling earbuds，金额 129.90）。",
+                System.currentTimeMillis() + 60_000
+        ));
+        ProviderSemanticConfirmationIntentClassifier classifier = new ProviderSemanticConfirmationIntentClassifier(
+                new LlmProviderAdapterRegistry(List.of(provider)),
+                mock(TrajectoryStore.class),
+                pendingStore,
+                new ObjectMapper()
+        );
+
+        classifier.classify(
+                "run-1",
+                "user-1",
+                runContext("run-1"),
+                "没问题，按刚才的取消方案继续处理"
+        );
+
+        assertThat(provider.requests).singleElement().satisfies(request -> {
+            String prompt = request.messages().get(1).content();
+            assertThat(prompt)
+                    .contains("pendingToolName: cancel_order")
+                    .contains("pendingSummary: 将取消订单 O-1001")
+                    .contains("pendingArgsJson");
+            assertThat(prompt).doesNotContain("secret-token");
+        });
     }
 
     private static RunContext runContext(String runId) {

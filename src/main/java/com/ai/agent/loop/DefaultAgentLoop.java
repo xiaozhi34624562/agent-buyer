@@ -176,6 +176,7 @@ public final class DefaultAgentLoop implements AgentLoop {
                     runContext,
                     message.content()
             );
+            writeConfirmationDecisionEvent(runId, confirmationDecision);
             if (confirmationDecision.intent() == HumanIntentResolver.ConfirmationIntent.REJECT) {
                 confirmTokenStore.clearRun(runId);
                 pendingConfirmToolStore.clearRun(runId);
@@ -261,6 +262,27 @@ public final class DefaultAgentLoop implements AgentLoop {
             AgentEventSink sink
     ) {
         return turnOrchestrator.runUntilStop(runId, userId, runContext, params, sink);
+    }
+
+    private void writeConfirmationDecisionEvent(String runId, HumanIntentResolver.ConfirmationDecision decision) {
+        if (decision == null) {
+            return;
+        }
+        try {
+            trajectoryStore.writeAgentEvent(
+                    runId,
+                    "confirmation_intent_decision",
+                    "{\"intent\":\"" + decision.intent().name()
+                            + "\",\"source\":\"" + escapeJson(decision.source())
+                            + "\",\"confidence\":" + decision.confidence() + "}"
+            );
+        } catch (RuntimeException e) {
+            log.warn("failed to write confirmation decision event runId={} error={}", runId, e.getMessage());
+        }
+    }
+
+    private String escapeJson(String value) {
+        return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     private void createRunAndContext(String runId, String userId, RunContext runContext) {

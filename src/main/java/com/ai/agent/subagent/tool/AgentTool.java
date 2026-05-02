@@ -59,18 +59,6 @@ public final class AgentTool extends AbstractTool {
     private final ObjectProvider<SubAgentRunner> runnerProvider;
     private final AgentProperties properties;
 
-    public AgentTool(PiiMasker piiMasker, ObjectMapper objectMapper) {
-        this(piiMasker, objectMapper, null, new AgentProperties());
-    }
-
-    public AgentTool(
-            PiiMasker piiMasker,
-            ObjectMapper objectMapper,
-            ObjectProvider<SubAgentRunner> runnerProvider
-    ) {
-        this(piiMasker, objectMapper, runnerProvider, new AgentProperties());
-    }
-
     @Autowired
     public AgentTool(
             PiiMasker piiMasker,

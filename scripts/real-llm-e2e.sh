@@ -117,8 +117,8 @@ start_app() {
     large_head="${E2E_LARGE_RESULT_HEAD_TOKENS:-20}"
     large_tail="${E2E_LARGE_RESULT_TAIL_TOKENS:-20}"
     micro_threshold="${E2E_MICRO_COMPACT_THRESHOLD_TOKENS:-260}"
-    summary_threshold="${E2E_SUMMARY_COMPACT_THRESHOLD_TOKENS:-420}"
-    recent_budget="${E2E_RECENT_MESSAGE_BUDGET_TOKENS:-120}"
+    summary_threshold="${E2E_SUMMARY_COMPACT_THRESHOLD_TOKENS:-180}"
+    recent_budget="${E2E_RECENT_MESSAGE_BUDGET_TOKENS:-80}"
     summary_max="${E2E_SUMMARY_MAX_TOKENS:-4096}"
     hard_cap="${E2E_HARD_TOKEN_CAP:-12000}"
   fi
@@ -388,7 +388,7 @@ JSON
 JSON
   post_sse "${OUT_DIR}/order-confirm.sse" "${OUT_DIR}/order-confirm-request.json" "${ACTIVE_BASE_URL}/api/agent/runs/${run_id}/messages"
   summarize_sse "order-confirm" "${OUT_DIR}/order-confirm.sse" "${OUT_DIR}/order-confirm-summary.json" "SUCCEEDED" "cancel_order" 1
-  assert_positive_count "semantic confirmation event" "SELECT COUNT(*) FROM agent_event WHERE run_id = '${run_id}' AND event_type = 'confirmation_intent_llm'"
+  assert_positive_count "confirmation decision event" "SELECT COUNT(*) FROM agent_event WHERE run_id = '${run_id}' AND event_type IN ('confirmation_intent_decision', 'confirmation_intent_llm')"
   get_json "${OUT_DIR}/order-trajectory.json" "${ACTIVE_BASE_URL}/api/agent/runs/${run_id}"
   assert_json_contains "${OUT_DIR}/order-trajectory.json" "query_order" "cancel_order" "SUCCEEDED"
   local status
@@ -531,7 +531,7 @@ run_skill_compact_case() {
   "messages": [
     {
       "role": "user",
-      "content": "/purchase-guide 请严格按顺序调用工具：先 skill_list；再分别调用 skill_view 读取 purchase-guide、return-exchange-guide、order-issue-support 的 SKILL.md；然后调用 query_order 查询最近7天订单；最后结合 skill 内容和订单结果用中文总结。每个 skill_view 只允许调用一次，query_order 只允许调用一次；如果历史里出现压缩摘要或占位符，不要重新读取或重新查询，直接基于已获得的信息总结。"
+      "content": "/purchase-guide 为了验证上下文压缩，请严格分多轮调用工具，且每一轮 assistant 最多只允许发起一个 tool_call，禁止在同一轮批量调用多个工具。固定顺序：第1轮只调用 skill_list；第2轮只调用 skill_view 读取 purchase-guide 的 SKILL.md；第3轮只调用 skill_view 读取 return-exchange-guide 的 SKILL.md；第4轮只调用 skill_view 读取 order-issue-support 的 SKILL.md；第5轮只调用 query_order 查询最近7天订单；最后结合 skill 内容和订单结果用中文总结。每个 skill_view 只允许调用一次，query_order 只允许调用一次；如果历史里出现压缩摘要或占位符，不要重新读取或重新查询，直接基于已获得的信息总结。"
     }
   ],
   "allowedToolNames": ["skill_list", "skill_view", "query_order"],
@@ -550,6 +550,7 @@ JSON
   get_json "${OUT_DIR}/skill-compact-trajectory.json" "${ACTIVE_BASE_URL}/api/agent/runs/${run_id}"
   assert_json_contains "${OUT_DIR}/skill-compact-trajectory.json" "skill_slash_injected" "skill_list" "skill_view" "purchase-guide"
   assert_positive_count "skill slash injected event" "SELECT COUNT(*) FROM agent_event WHERE run_id = '${run_id}' AND event_type = 'skill_slash_injected'"
+  assert_positive_count "three skill_view calls" "SELECT CASE WHEN COUNT(*) >= 3 THEN 1 ELSE 0 END FROM agent_tool_call_trace WHERE run_id = '${run_id}' AND tool_name = 'skill_view'"
   assert_positive_count "context compaction rows" "SELECT COUNT(*) FROM agent_context_compaction WHERE run_id = '${run_id}'"
   local strategies
   strategies="$(mysql_scalar "SELECT COALESCE(GROUP_CONCAT(DISTINCT strategy ORDER BY strategy SEPARATOR ','), '') FROM agent_context_compaction WHERE run_id = '${run_id}'")"
