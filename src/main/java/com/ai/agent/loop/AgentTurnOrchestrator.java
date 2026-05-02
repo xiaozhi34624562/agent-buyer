@@ -12,6 +12,7 @@ import com.ai.agent.llm.model.LlmStreamResult;
 import com.ai.agent.llm.model.MessageRole;
 import com.ai.agent.skill.command.SkillCommandException;
 import com.ai.agent.tool.core.Tool;
+import com.ai.agent.tool.model.ToolTerminal;
 import com.ai.agent.trajectory.model.RunContext;
 import com.ai.agent.trajectory.port.TrajectoryReader;
 import com.ai.agent.trajectory.port.TrajectoryStore;
@@ -90,6 +91,20 @@ public final class AgentTurnOrchestrator {
             AgentEventSink sink
     ) {
         return runUntilStop(runId, runWideBudgetRunId, userId, runContext, params, sink, true);
+    }
+
+    /**
+     * Execute a pending confirmed tool directly (bypassing LLM).
+     * Used for HITL confirmation flow where user confirms and we execute the tool directly.
+     */
+    public ToolTerminal executePendingConfirmTool(
+            String runId,
+            String userId,
+            String toolName,
+            String argsJson,
+            AgentEventSink sink
+    ) {
+        return toolCallCoordinator.executePendingConfirmTool(runId, userId, toolName, argsJson, sink);
     }
 
     private AgentRunResult runUntilStop(

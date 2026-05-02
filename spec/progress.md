@@ -1251,3 +1251,32 @@ Console 不做：
 - E2E 真实 LLM 测试（启动后端 + 前端，使用真实 DeepSeek/Qwen API）
 - V3 完成，准备 push
 - 开始 V3-M2 Frontend Shell
+
+## 2026-05-02 HITL Confirmation Architecture Fix
+
+### P1 修复：服务端执行确认后的工具
+
+- **问题**：原架构要求 LLM 复制 confirmToken 到下一次 tool call，导致 E2E 测试失败
+- **根因**：dry-run 返回 PENDING_CONFIRM 时使用 toolCallId_A，用户确认后 LLM 需要复制 confirmToken 并发起新 tool call，但新 call 复用了相同 toolCallId_A，导致 "missing tool result" 错误
+- **修复方案**：
+  - 新增 `PendingConfirmToolStore`：保存 dry-run 返回的 tool 执行上下文（toolName、argsJson、confirmToken）
+  - 新增 `ToolCallCoordinator.executePendingConfirmTool`：用户确认后创建新的 toolCallId/toolUseId，直接执行工具（绕过 LLM）
+  - `DefaultAgentLoop` 确认流程改为调用 `executePendingConfirmTool`，不再注入合成 LLM message
+  - 执行前持久化 tool call 到 trajectory（解决外键约束问题）
+
+### E2E 验证结果
+
+- **时间**：2026-05-02 14:24 CST
+- **Case 1 (订单取消 dry-run + confirm)**：**PASSED** ✓
+- **Case 2-4**：**PASSED** ✓
+- **Case 5 (skill-compact)**：FAILED - duplicate tool result（独立问题，与本次修复无关）
+
+### 代码改动
+
+- `src/main/java/com/ai/agent/loop/ToolCallCoordinator.java`：+89 行
+- `src/main/java/com/ai/agent/loop/DefaultAgentLoop.java`：+62/-18 行
+- `src/main/java/com/ai/agent/loop/AgentTurnOrchestrator.java`：+15 行
+
+### 残余问题
+
+- Case 5 的 duplicate tool result (`call_01_7ZlkAE3rvy75ox8aEbYLNXnh`) 是 skill_view 工具的独立 bug，需要后续排查

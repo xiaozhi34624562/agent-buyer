@@ -429,6 +429,95 @@ public final class ToolCallCoordinator {
         }
     }
 
+    /**
+     * Execute a pending confirmed tool call directly (bypassing LLM).
+     * Used for HITL confirmation flow where user confirms and we execute the tool directly.
+     *
+     * @param runId run identifier
+     * @param userId user identifier
+     * @param toolName tool name to execute
+     * @param argsJson arguments JSON (with confirmToken already included)
+     * @param sink event sink for SSE notifications
+     * @return the tool execution result
+     */
+    public ToolTerminal executePendingConfirmTool(
+            String runId,
+            String userId,
+            String toolName,
+            String argsJson,
+            AgentEventSink sink
+    ) {
+        Tool tool = toolRegistry.resolve(toolName);
+
+        // Create a NEW tool call with NEW IDs for this execution
+        String newToolCallId = Ids.newId("tc");
+        String newToolUseId = Ids.newId("call");
+        long seq = trajectoryReader.findToolCallsByRun(runId).size() + 1L;
+
+        ToolCall call = new ToolCall(
+                runId,
+                newToolCallId,
+                seq,
+                newToolUseId,
+                toolName,
+                tool.schema().name(),
+                argsJson,
+                tool.schema().isConcurrent(),
+                tool.schema().idempotent(),
+                false,
+                null,
+                tool.schema().timeout().toMillis()
+        );
+
+        // Persist tool call to trajectory (required for foreign key constraint)
+        // Create a system message to link the tool call
+        String messageId = trajectoryStore.appendMessage(
+                runId,
+                LlmMessage.user(Ids.newId("msg"), "用户已确认执行操作。")
+        );
+        trajectoryStore.writeToolCall(messageId, call);
+
+        // Register tool call in Redis for execution tracking
+        redisToolStore.ingestWaiting(runId, call);
+
+        // Emit tool_use event
+        sink.onToolUse(new ToolUseEvent(runId, newToolUseId, tool.schema().name(), argsJson));
+
+        // Execute tool
+        toolRuntime.onToolUse(runId, call);
+
+        // Wait for result using the tool's timeout
+        try {
+            List<ToolTerminal> terminals = toolResultWaiter.awaitResults(
+                    runId,
+                    List.of(call),
+                    tool.schema().timeout()
+            );
+
+            if (terminals.isEmpty()) {
+                throw new IllegalStateException("no result for tool call: " + newToolCallId);
+            }
+
+            ToolTerminal terminal = terminals.get(0);
+
+            // Close the result (writes to trajectory)
+            toolResultCloser.closeTerminal(runId, call, terminal, sink);
+
+            return terminal;
+        } catch (ToolResultTimeoutException e) {
+            ToolTerminal timeoutTerminal = new ToolTerminal(
+                    newToolCallId,
+                    ToolStatus.FAILED,
+                    null,
+                    errorJson("timeout", "tool execution timeout"),
+                    CancelReason.TOOL_TIMEOUT,
+                    true
+            );
+            toolResultCloser.closeTerminal(runId, call, timeoutTerminal, sink);
+            return timeoutTerminal;
+        }
+    }
+
     public record ToolStepResult(
             List<ToolCall> allCalls,
             List<ToolCall> executableCalls,

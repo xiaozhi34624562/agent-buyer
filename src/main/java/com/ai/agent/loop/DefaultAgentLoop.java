@@ -7,9 +7,10 @@ import com.ai.agent.config.AgentProperties;
 import com.ai.agent.domain.RunStatus;
 import com.ai.agent.llm.context.PromptAssembler;
 import com.ai.agent.llm.model.LlmMessage;
-import com.ai.agent.llm.model.ToolCallMessage;
 import com.ai.agent.tool.core.Tool;
 import com.ai.agent.tool.registry.ToolRegistry;
+import com.ai.agent.tool.model.ToolStatus;
+import com.ai.agent.tool.model.ToolTerminal;
 import com.ai.agent.tool.runtime.RunEventSinkRegistry;
 import com.ai.agent.tool.security.ConfirmTokenStore;
 import com.ai.agent.tool.security.PendingConfirmToolStore;
@@ -201,26 +202,51 @@ public final class DefaultAgentLoop implements AgentLoop {
                 log.info("agent continuation remains waiting because user confirmation intent is ambiguous");
                 return waiting;
             }
-            // CONFIRM intent: inject synthetic tool call with confirmToken and execute
-            log.info("agent continuation confirmed - injecting pending tool call");
+            // CONFIRM intent: execute pending tool directly (bypass LLM)
+            log.info("agent continuation confirmed - executing pending tool");
             PendingConfirmToolStore.PendingConfirmTool pendingTool = pendingConfirmToolStore.consume(runId);
-            if (pendingTool != null) {
-                // Create synthetic assistant message with pending tool call
-                ToolCallMessage syntheticCall = new ToolCallMessage(
-                        pendingTool.toolCallId(),
-                        pendingTool.toolName(),
-                        pendingTool.argsJson()
-                );
-                trajectoryStore.appendMessage(runId, LlmMessage.assistant(
-                        Ids.newId("msg"),
-                        null,  // No text content, just tool call
-                        List.of(syntheticCall)
-                ));
-                log.info("synthetic tool call injected toolName={} toolCallId={}", pendingTool.toolName(), pendingTool.toolCallId());
-            } else {
+            if (pendingTool == null) {
                 log.warn("no pending tool found for runId={} - proceeding with normal continuation", runId);
+                return runUntilStop(runId, userId, runContext, null, sink);
             }
-            return runUntilStop(runId, userId, runContext, null, sink);
+
+            // Execute the pending confirmed tool directly
+            try {
+                ToolTerminal terminal = turnOrchestrator.executePendingConfirmTool(
+                        runId, userId, pendingTool.toolName(), pendingTool.argsJson(), sink);
+
+                // Build result message
+                String finalText;
+                if (terminal.status() == ToolStatus.SUCCEEDED && terminal.resultJson() != null) {
+                    // Parse result and generate success message
+                    String resultText = terminal.resultJson();
+                    if (resultText.contains("COMPLETED")) {
+                        finalText = "订单已成功取消。";
+                    } else {
+                        finalText = "操作已完成。";
+                    }
+                } else if (terminal.status() == ToolStatus.FAILED) {
+                    finalText = "操作执行失败：" + (terminal.errorJson() != null ? terminal.errorJson() : "未知错误");
+                } else {
+                    finalText = "操作执行完成。";
+                }
+
+                trajectoryStore.appendMessage(runId, LlmMessage.assistant(Ids.newId("msg"), finalText, List.of()));
+                AgentRunResult terminalResult = transitionTerminal(runId, RunStatus.SUCCEEDED, null, finalText);
+                if (terminalResult.status() != RunStatus.SUCCEEDED) {
+                    return terminalResult;
+                }
+                sink.onFinal(new FinalEvent(runId, finalText, RunStatus.SUCCEEDED, null));
+                log.info("agent continuation completed - pending tool executed successfully");
+                return terminalResult;
+            } catch (Exception e) {
+                log.error("failed to execute pending tool runId={} error={}", runId, e.getMessage());
+                String errorText = "执行操作时出现错误：" + e.getMessage();
+                trajectoryStore.appendMessage(runId, LlmMessage.assistant(Ids.newId("msg"), errorText, List.of()));
+                AgentRunResult failed = transitionTerminal(runId, RunStatus.FAILED, e.getMessage(), errorText);
+                sink.onFinal(new FinalEvent(runId, errorText, RunStatus.FAILED, null));
+                return failed;
+            }
         } finally {
             sinkRegistry.unbind(runId);
             runAccessManager.releaseContinuation(permit);
