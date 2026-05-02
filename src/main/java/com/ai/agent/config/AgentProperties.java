@@ -25,6 +25,7 @@ public class AgentProperties {
     private SubAgent subAgent = new SubAgent();
     private Runtime runtime = new Runtime();
     private Todo todo = new Todo();
+    private Admin admin = new Admin();
 
     public String getRedisKeyPrefix() {
         return redisKeyPrefix;
@@ -160,6 +161,14 @@ public class AgentProperties {
 
     public void setTodo(Todo todo) {
         this.todo = todo == null ? new Todo() : todo;
+    }
+
+    public Admin getAdmin() {
+        return admin;
+    }
+
+    public void setAdmin(Admin admin) {
+        this.admin = admin == null ? new Admin() : admin;
     }
 
     public static class AgentLoop {
@@ -753,6 +762,27 @@ public class AgentProperties {
 
         public void setReminderTurnInterval(int reminderTurnInterval) {
             this.reminderTurnInterval = reminderTurnInterval;
+        }
+    }
+
+    public static class Admin {
+        private boolean enabled = false;
+        private String token = "";
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getToken() {
+            return token;
+        }
+
+        public void setToken(String token) {
+            this.token = token;
         }
     }
 

@@ -1008,3 +1008,94 @@ V2.2 必须在 `V21-GATE` 完成后启动。占位列表：
   - 从 `V3M1-01` 开始，先补 V3 实施基线与现有 endpoint / DTO / Redis key 清单。
   - 每完成一个 V3 task，同步更新 `task.md` 状态与本文件进度记录。
   - 每个里程碑 gate 沿用主 agent 分发与验收、sub agent 执行的工作流；Java/YAML/SQL 变更使用 `java-alibaba-review` gate，前端 React/TypeScript 变更使用 `front-alibaba-review` gate。
+
+### V3M1-01 基线梳理记录
+
+- 时间：2026-05-02 CST。
+- 状态：`IN_PROGRESS` → `DONE`（纯文档任务）。
+- 输出：梳理 V3 实施基线与契约，记录现有 endpoint、DTO、Redis key、admin 配置缺口。
+
+#### 现有 `/api/agent/*` Endpoint 清单
+
+来源：`com.ai.agent.web.controller.AgentController`
+
+| Endpoint | Method | 功能 | SSE | Header |
+|---|---|---|---|---|
+| `/api/agent/runs` | POST | 创建新 run | 是 | `X-User-Id` |
+| `/api/agent/runs/{runId}/messages` | POST | 继续对话 | 是 | `X-User-Id` |
+| `/api/agent/runs/{runId}` | GET | 查询 trajectory | 否 | `X-User-Id` |
+| `/api/agent/runs/{runId}/abort` | POST | 终止 run | 否 | `X-User-Id` |
+| `/api/agent/runs/{runId}/interrupt` | POST | 中断当前 turn | 否 | `X-User-Id` |
+
+V3 Console 复用以上全部 endpoint，不新增 `/api/admin/chat`。
+
+#### Trajectory DTO 清单
+
+来源：`com.ai.agent.trajectory.dto.*`
+
+| DTO | 用途 |
+|---|---|
+| `AgentRunTrajectoryDto` | trajectory 顶层容器，含 `run`、`messages`、`llmAttempts`、`toolCalls`、`toolResults`、`events`、`compactions` |
+| `RunDto` | run summary：runId、userId、status、turnNo、agentType、parentRunId、parentLinkStatus、primaryProvider、fallbackProvider、model、maxTurns、startedAt、updatedAt、completedAt、lastError |
+| `MessageDto` | user/assistant message，含 role、content、timestamp |
+| `MessageToolCallDto` | message 中嵌入的 tool call 引用 |
+| `LlmAttemptDto` | LLM 调用记录：attemptId、provider、model、usage、finishReason、error |
+| `ToolCallDto` | tool call 详情：toolCallId、toolName、args、status、createTime |
+| `ToolProgressDto` | tool 执行进度：percent、message |
+| `ToolResultDto` | tool 结果：toolCallId、result/synthetic/cancelReason、createTime |
+| `EventDto` | 状态事件：eventType、details、timestamp |
+| `CompactionDto` | compaction 记录：strategy、beforeTokens、afterTokens、compactedMessageIds |
+
+V3-M1 Run List DTO 需参考 `RunDto` 字段；Timeline Panel 直接复用 `AgentRunTrajectoryDto` 结构。
+
+#### RedisKeys 中 V3 会读取的 Key
+
+来源：`com.ai.agent.tool.runtime.redis.RedisKeys`
+
+| Key Pattern | 类型 | V3 用途 |
+|---|---|---|
+| `agent:{run:<runId>}:meta` | HASH | run 元数据：status、userId、turnNo、createdAt |
+| `agent:{run:<runId>}:queue` | ZSET | tool queue：score 为执行时间 |
+| `agent:{run:<runId>}:tools` | HASH | tool 状态：toolUseId -> status/resultPath |
+| `agent:{run:<runId>}:leases` | HASH | tool lease：toolUseId -> expireAt |
+| `agent:{run:<runId>}:control` | HASH | abort/interrupt 控制字段 |
+| `agent:{run:<runId>}:children` | SET | SubAgent child runId 集合 |
+| `agent:{run:<runId>}:todos` | HASH | ToDo steps |
+| `agent:{run:<runId>}:todo-reminder` | STRING | transient reminder content |
+| `agent:{run:<runId>}:llm-call-budget` | STRING | budget 计数 |
+| `agent:{run:<runId>}:tool-use-ids` | SET | 当前 turn tool use ID 集合 |
+| `agent:{run:<runId>}:continuation-lock` | STRING | continuation 锁 |
+| `agent:active-runs` | SET | 全局 active runId 集合（只用于计算 `activeRun` 布尔值，不返回完整 set） |
+
+V3 Runtime State DTO 只返回当前 run 固定 key 投影，不支持任意 Redis key 输入。
+
+#### 当前 AgentProperties Admin 配置缺口
+
+来源：`com.ai.agent.config.AgentProperties`
+
+当前配置结构：
+- `agent.redis-key-prefix`
+- `agent.default-allowed-tools`
+- `agent.max-parallel` / `max-scan` / `lease-ms` / `confirmation-ttl`
+- `agent.reaper.enabled` / `interval-ms`
+- `agent.agent-loop.*`（maxTurns、timeout、budget）
+- `agent.executor.*`
+- `agent.llm.*`（provider、deepseek、qwen）
+- `agent.rate-limit.*`
+- `agent.request-policy.*`
+- `agent.context.*`（compact threshold）
+- `agent.skills.*`
+- `agent.sub-agent.*`
+- `agent.runtime.*`（sweeper、pubsub、interrupt）
+- `agent.todo.*`
+
+**缺口**：缺少 V3 Console Admin 访问控制配置：
+- `agent.admin.enabled`：boolean，是否启用 Admin Console API
+- `agent.admin.token`：string，Admin 访问令牌
+
+V3M1-02 需新增以上配置项，并实现 `AdminAccessGuard` 校验。
+
+#### V3M1-01 结论
+
+- 基线信息已梳理完成，无功能代码变更。
+- 下一步：V3M1-02，新增 `agent.admin.enabled/token` 配置与 `AdminAccessGuard` 校验。

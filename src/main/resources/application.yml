@@ -102,3 +102,6 @@ agent:
     tool-result-pubsub-enabled: true
     tool-result-poll-interval-ms: 500
     interrupt-enabled: true
+  admin:
+    enabled: false
+    token: ${AGENT_ADMIN_TOKEN:}
