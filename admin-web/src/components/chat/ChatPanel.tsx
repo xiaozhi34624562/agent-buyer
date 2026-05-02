@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { Send, Square } from 'lucide-react'
 import { Button } from '../ui/Button'
-import type { ToolCard } from '../../hooks/useChatStream'
+import type { ToolCard } from '../../types'
 
 interface ChatMessage {
   role: 'user' | 'assistant'

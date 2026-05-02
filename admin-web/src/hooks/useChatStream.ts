@@ -1,16 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
-import type { SseEvent } from '../types'
-
-export interface ToolCard {
-  toolCallId: string
-  toolName: string
-  args: Record<string, unknown>
-  status: 'pending' | 'running' | 'completed' | 'error'
-  progress?: number
-  progressMessage?: string
-  result?: string
-  resultStatus?: string
-}
+import type { SseEvent, ToolCard } from '../types'
 
 export interface ChatStreamState {
   runId: string | null

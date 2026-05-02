@@ -167,7 +167,7 @@ describe('useChatMessages', () => {
 
     act(() => {
       result.current.addAssistantMessage('处理完成', [
-        { toolCallId: 'tc-001', toolName: 'query_order', status: 'completed', result: '{"orderId":"ORD-123"}' },
+        { toolCallId: 'tc-001', toolName: 'query_order', args: {}, status: 'completed', result: '{"orderId":"ORD-123"}' },
       ])
     })
 

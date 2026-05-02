@@ -1,15 +1,10 @@
 import { useState, useCallback } from 'react'
-import type { SseEvent } from '../types'
+import type { SseEvent, ToolCard } from '../types'
 
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
-  toolCards?: Array<{
-    toolCallId: string
-    toolName: string
-    status: string
-    result?: string
-  }>
+  toolCards?: ToolCard[]
 }
 
 export interface UseChatMessagesOptions {

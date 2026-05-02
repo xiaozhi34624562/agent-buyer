@@ -24,6 +24,18 @@ export interface RuntimeState {
   entries: Record<string, unknown>
 }
 
+// Tool card for chat display
+export interface ToolCard {
+  toolCallId: string
+  toolName: string
+  args: Record<string, unknown>
+  status: 'pending' | 'running' | 'completed' | 'error'
+  progress?: number
+  progressMessage?: string
+  result?: string
+  resultStatus?: string
+}
+
 // Trajectory timeline node types
 export type TrajectoryNodeType =
   | 'MESSAGE'

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { ChatPanel } from '../components/chat/ChatPanel'
-import type { ToolCard } from '../hooks/useChatStream'
+import type { ToolCard } from '../types'
 
 describe('ChatPanel', () => {
   const defaultProps = {
