@@ -8,6 +8,10 @@ interface ConsoleShellProps {
   adminToken: string
   onUserIdChange: (userId: string) => void
   onAdminTokenChange: (token: string) => void
+  onRefresh?: () => void
+  loading?: boolean
+  debug?: boolean
+  onDebugChange?: (debug: boolean) => void
   runsPanel: ReactNode
   timelinePanel: ReactNode
   chatPanel: ReactNode
@@ -18,6 +22,10 @@ export function ConsoleShell({
   adminToken,
   onUserIdChange,
   onAdminTokenChange,
+  onRefresh,
+  loading,
+  debug,
+  onDebugChange,
   runsPanel,
   timelinePanel,
   chatPanel,
@@ -48,6 +56,10 @@ export function ConsoleShell({
           adminToken={adminToken}
           onUserIdChange={onUserIdChange}
           onAdminTokenChange={onAdminTokenChange}
+          onRefresh={onRefresh}
+          loading={loading}
+          debug={debug}
+          onDebugChange={onDebugChange}
         />
       </header>
 

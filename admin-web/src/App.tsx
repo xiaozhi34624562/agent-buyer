@@ -5,6 +5,7 @@ import { Panel } from './components/ui/Panel'
 function App() {
   const [userId, setUserId] = useState(() => localStorage.getItem('userId') || 'demo-user')
   const [adminToken, setAdminToken] = useState(() => localStorage.getItem('adminToken') || '')
+  const [debug, setDebug] = useState(() => localStorage.getItem('debug') === 'true')
 
   // Persist to localStorage
   useEffect(() => {
@@ -15,12 +16,18 @@ function App() {
     localStorage.setItem('adminToken', adminToken)
   }, [adminToken])
 
+  useEffect(() => {
+    localStorage.setItem('debug', String(debug))
+  }, [debug])
+
   return (
     <ConsoleShell
       userId={userId}
       adminToken={adminToken}
       onUserIdChange={setUserId}
       onAdminTokenChange={setAdminToken}
+      debug={debug}
+      onDebugChange={setDebug}
       runsPanel={<Panel title="Runs">Run list loading...</Panel>}
       timelinePanel={<Panel title="Timeline">Timeline loading...</Panel>}
       chatPanel={<Panel title="Chat">Chat loading...</Panel>}

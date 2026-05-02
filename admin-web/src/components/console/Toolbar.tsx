@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { RefreshCw, Settings } from 'lucide-react'
+import { RefreshCw, Settings, Bug } from 'lucide-react'
 import { Button } from '../ui/Button'
 
 interface ToolbarProps {
@@ -9,6 +9,8 @@ interface ToolbarProps {
   onAdminTokenChange: (token: string) => void
   onRefresh?: () => void
   loading?: boolean
+  debug?: boolean
+  onDebugChange?: (debug: boolean) => void
 }
 
 export function Toolbar({
@@ -18,6 +20,8 @@ export function Toolbar({
   onAdminTokenChange,
   onRefresh,
   loading = false,
+  debug = false,
+  onDebugChange,
 }: ToolbarProps) {
   const [showSettings, setShowSettings] = useState(false)
 
@@ -39,6 +43,19 @@ export function Toolbar({
           icon={<RefreshCw className="w-4 h-4" />}
         >
           Refresh
+        </Button>
+      )}
+
+      {/* Debug toggle */}
+      {onDebugChange && (
+        <Button
+          variant={debug ? 'primary' : 'ghost'}
+          size="sm"
+          onClick={() => onDebugChange(!debug)}
+          disabled={loading}
+          icon={<Bug className="w-4 h-4" />}
+        >
+          {debug ? 'Debug On' : 'Debug'}
         </Button>
       )}
 

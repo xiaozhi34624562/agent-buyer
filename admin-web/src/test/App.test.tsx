@@ -27,4 +27,23 @@ describe('App', () => {
     render(<App />)
     expect(screen.getByText(/User:/)).toBeInTheDocument()
   })
+
+  it('should not display adminToken in page text', () => {
+    localStorage.setItem('adminToken', 'secret-admin-token-12345')
+    render(<App />)
+    // Admin token should never appear as plain text in the rendered page
+    expect(screen.queryByText('secret-admin-token-12345')).not.toBeInTheDocument()
+    // The token input is password type, so its value is not visible
+    expect(screen.queryByDisplayValue('secret-admin-token-12345')).not.toBeInTheDocument()
+  })
+
+  it('should render Debug toggle button', () => {
+    render(<App />)
+    expect(screen.getByRole('button', { name: /Debug/ })).toBeInTheDocument()
+  })
+
+  it('should render Settings button', () => {
+    render(<App />)
+    expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
+  })
 })
