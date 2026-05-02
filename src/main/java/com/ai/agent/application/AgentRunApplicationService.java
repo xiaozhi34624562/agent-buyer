@@ -15,6 +15,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+/**
+ * Agent运行应用服务
+ * <p>
+ * Agent运行的核心应用服务，提供创建运行、继续运行、查询运行轨迹、
+ * 中止运行、中断运行等操作，是用户与Agent系统交互的主要入口。
+ * </p>
+ */
 @Service
 public final class AgentRunApplicationService {
     private static final Logger log = LoggerFactory.getLogger(AgentRunApplicationService.class);
@@ -55,6 +62,18 @@ public final class AgentRunApplicationService {
         this.interruptService = interruptService;
     }
 
+    /**
+     * 创建新的Agent运行
+     * <p>
+     * 校验请求参数、检查服务状态、执行限流判断，然后返回运行计划供执行器调度。
+     * </p>
+     *
+     * @param userId  用户ID
+     * @param request Agent运行请求
+     * @return 运行流计划，包含执行动作和拒绝回调
+     * @throws ServiceUnavailableException 当服务正在关闭时抛出
+     * @throws RateLimitExceededException  当用户超过限流阈值时抛出
+     */
     public RunStreamPlan createRun(String userId, AgentRunRequest request) {
         requestPolicy.validateCreateRun(request);
         if (!admissionController.isAccepting()) {
@@ -70,6 +89,18 @@ public final class AgentRunApplicationService {
         });
     }
 
+    /**
+     * 继续已有的Agent运行
+     * <p>
+     * 校验请求参数、获取继续运行许可、返回运行计划供执行器调度。
+     * </p>
+     *
+     * @param userId  用户ID
+     * @param runId   运行ID
+     * @param request 继续运行请求
+     * @return 运行流计划，包含执行动作和拒绝回调
+     * @throws ServiceUnavailableException 当服务正在关闭时抛出
+     */
     public RunStreamPlan continueRun(String userId, String runId, ContinueRunRequest request) {
         requestPolicy.validateContinueRun(request);
         if (!admissionController.isAccepting()) {
@@ -85,12 +116,32 @@ public final class AgentRunApplicationService {
         );
     }
 
+    /**
+     * 查询运行轨迹
+     * <p>
+     * 获取指定运行的完整轨迹信息，包括消息历史、工具调用等。
+     * </p>
+     *
+     * @param userId 用户ID
+     * @param runId  运行ID
+     * @return 运行轨迹数据
+     */
     public AgentRunTrajectoryDto queryRun(String userId, String runId) {
         runAccessManager.assertCanQuery(runId, userId);
         log.info("trajectory requested runId={} userId={}", runId, userId);
         return trajectoryQueryService.getTrajectory(runId);
     }
 
+    /**
+     * 中止运行
+     * <p>
+     * 将运行标记为取消状态，关闭所有正在执行的工具调用，释放继续运行锁。
+     * </p>
+     *
+     * @param userId 用户ID
+     * @param runId  运行ID
+     * @return 中止响应结果
+     */
     public AbortRunResponse abortRun(String userId, String runId) {
         log.info("agent abort requested runId={} userId={}", runId, userId);
         RunAccessManager.AbortDecision abort = runAccessManager.abortIfActive(runId, userId);
@@ -101,16 +152,38 @@ public final class AgentRunApplicationService {
         return new AbortRunResponse(runId, abort.status(), abort.changed());
     }
 
+    /**
+     * 中断运行
+     * <p>
+     * 将运行暂停，保留当前状态以便后续继续执行。
+     * </p>
+     *
+     * @param userId 用户ID
+     * @param runId  运行ID
+     * @return 中断响应结果
+     */
     public RunInterruptService.InterruptRunResponse interruptRun(String userId, String runId) {
         log.info("agent interrupt requested runId={} userId={}", runId, userId);
         return interruptService.interrupt(userId, runId);
     }
 
+    /**
+     * 运行流执行动作接口
+     * <p>
+     * 定义执行Agent运行并返回结果的方法签名。
+     * </p>
+     */
     @FunctionalInterface
     public interface RunStreamAction {
         AgentRunResult run(AgentEventSink sink);
     }
 
+    /**
+     * 运行流计划
+     * <p>
+     * 包含运行ID、执行动作和执行器拒绝时的回调处理。
+     * </p>
+     */
     public record RunStreamPlan(
             String runId,
             RunStreamAction action,
@@ -124,12 +197,27 @@ public final class AgentRunApplicationService {
         }
     }
 
+    /**
+     * 中止运行响应结果
+     */
     public record AbortRunResponse(String runId, RunStatus status, boolean changed) {
     }
 
+    /**
+     * 限流超限异常
+     * <p>
+     * 当用户调用频率超过系统配置的限流阈值时抛出此异常。
+     * </p>
+     */
     public static final class RateLimitExceededException extends RuntimeException {
     }
 
+    /**
+     * 服务不可用异常
+     * <p>
+     * 当服务正在关闭或不可用时抛出此异常。
+     * </p>
+     */
     public static final class ServiceUnavailableException extends RuntimeException {
     }
 }

@@ -14,6 +14,10 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Component;
 
+/**
+ * 技能列表工具。
+ * 列出当前用户可用的所有技能。
+ */
 @Component
 public final class SkillListTool extends AbstractTool {
     private static final String SCHEMA = """
@@ -31,6 +35,11 @@ public final class SkillListTool extends AbstractTool {
         this.skillRegistry = skillRegistry;
     }
 
+    /**
+     * 获取工具Schema定义。
+     *
+     * @return 工具Schema
+     */
     @Override
     public ToolSchema schema() {
         return new ToolSchema(
@@ -45,6 +54,15 @@ public final class SkillListTool extends AbstractTool {
         );
     }
 
+    /**
+     * 执行技能列表查询。
+     *
+     * @param ctx              工具执行上下文
+     * @param running          已启动的工具实例
+     * @param normalizedArgsJson 标准化后的参数JSON
+     * @param token            取消令牌
+     * @return 工具执行结果
+     */
     @Override
     protected ToolTerminal doRun(
             ToolExecutionContext ctx,

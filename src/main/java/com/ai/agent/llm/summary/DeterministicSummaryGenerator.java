@@ -10,6 +10,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 确定性摘要生成器。
+ * 使用确定性规则生成对话摘要，不依赖LLM，用于快速压缩历史消息。
+ */
 public final class DeterministicSummaryGenerator implements SummaryGenerator {
     private static final int FACT_PREVIEW_CHARS = 240;
 
@@ -19,6 +23,13 @@ public final class DeterministicSummaryGenerator implements SummaryGenerator {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 生成确定性摘要。
+     *
+     * @param context        摘要生成上下文
+     * @param messagesToCompact 待压缩的消息列表
+     * @return JSON格式的摘要内容
+     */
     @Override
     public String generate(SummaryGenerationContext context, List<LlmMessage> messagesToCompact) {
         List<String> compactedMessageIds = messagesToCompact.stream()

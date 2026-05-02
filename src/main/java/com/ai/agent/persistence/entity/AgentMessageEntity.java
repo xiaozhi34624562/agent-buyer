@@ -5,6 +5,13 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
+/**
+ * Agent消息实体类
+ * <p>
+ * 映射数据库表 agent_message，记录Agent运行过程中产生的消息内容，
+ * 包括消息角色、内容、工具调用标识、工具调用详情等。
+ * </p>
+ */
 @TableName("agent_message")
 public class AgentMessageEntity {
     @TableId

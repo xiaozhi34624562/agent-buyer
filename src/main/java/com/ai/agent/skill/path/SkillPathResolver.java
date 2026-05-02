@@ -6,14 +6,32 @@ import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 
+/**
+ * 技能路径解析器。
+ * 安全地解析技能文件路径，防止路径越界攻击。
+ */
 public class SkillPathResolver {
+    /** 默认技能文件名 */
     private static final String DEFAULT_SKILL_PATH = "SKILL.md";
     private final Path skillsRoot;
 
+    /**
+     * 构造技能路径解析器。
+     *
+     * @param skillsRoot 技能根目录路径
+     */
     public SkillPathResolver(Path skillsRoot) {
         this.skillsRoot = skillsRoot;
     }
 
+    /**
+     * 查看技能文件内容。
+     *
+     * @param skillName 技能名称
+     * @param skillPath 技能内文件路径，为空时默认读取SKILL.md
+     * @return 文件内容
+     * @throws SkillPathException 如果路径无效或越界
+     */
     public String view(String skillName, String skillPath) {
         Path root = realSkillsRoot();
         Path skillRoot = realSkillRoot(root, skillName);

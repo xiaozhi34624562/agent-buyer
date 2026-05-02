@@ -22,6 +22,10 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Component;
 
+/**
+ * 查询订单工具。
+ * 根据日期范围、状态、关键词或订单ID查询用户订单。
+ */
 @Component
 public final class QueryOrderTool extends AbstractTool {
     private static final String SCHEMA = """
@@ -51,6 +55,11 @@ public final class QueryOrderTool extends AbstractTool {
         this.orderClient = orderClient;
     }
 
+    /**
+     * 获取工具Schema定义。
+     *
+     * @return 工具Schema
+     */
     @Override
     public ToolSchema schema() {
         return new ToolSchema(
@@ -65,6 +74,13 @@ public final class QueryOrderTool extends AbstractTool {
         );
     }
 
+    /**
+     * 验证工具参数。
+     *
+     * @param ctx  工具使用上下文
+     * @param use  工具使用请求
+     * @return 验证结果
+     */
     @Override
     public ToolValidation validate(ToolUseContext ctx, ToolUse use) {
         try {
@@ -78,6 +94,15 @@ public final class QueryOrderTool extends AbstractTool {
         }
     }
 
+    /**
+     * 执行订单查询操作。
+     *
+     * @param ctx              工具执行上下文
+     * @param running          已启动的工具实例
+     * @param normalizedArgsJson 标准化后的参数JSON
+     * @param token            取消令牌
+     * @return 工具执行结果
+     */
     @Override
     protected ToolTerminal doRun(
             ToolExecutionContext ctx,

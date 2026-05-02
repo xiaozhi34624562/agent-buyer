@@ -17,6 +17,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.springframework.stereotype.Component;
 
+/**
+ * 技能命令解析器。
+ * 解析用户消息中的斜杠命令（如/skill-name），将对应技能内容注入对话上下文。
+ */
 @Component
 public final class SkillCommandResolver {
     private static final Pattern SLASH_SKILL = Pattern.compile("(?<!\\S)/([a-z0-9][a-z0-9-]*)\\b");
@@ -39,6 +43,13 @@ public final class SkillCommandResolver {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 解析消息列表中的斜杠技能命令。
+     *
+     * @param messages 消息列表
+     * @return 技能命令解析结果
+     * @throws SkillCommandException 如果技能未找到或超出预算限制
+     */
     public SkillCommandResolution resolve(List<LlmMessage> messages) {
         LlmMessage latestUserMessage = latestUserMessage(messages);
         if (latestUserMessage == null) {

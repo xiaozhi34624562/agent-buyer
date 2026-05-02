@@ -26,6 +26,10 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+/**
+ * 工具结果关闭器。
+ * 将工具执行结果写入轨迹存储并生成对应的工具消息。
+ */
 @Component
 public final class ToolResultCloser {
     private static final Logger log = LoggerFactory.getLogger(ToolResultCloser.class);
@@ -59,10 +63,25 @@ public final class ToolResultCloser {
         this.sanitizer = sanitizer;
     }
 
+    /**
+     * 关闭单个工具结果。
+     *
+     * @param runId    运行ID
+     * @param call     工具调用
+     * @param terminal 工具执行结果
+     * @param sink     事件接收器
+     */
     public void closeTerminal(String runId, ToolCall call, ToolTerminal terminal, AgentEventSink sink) {
         closeTerminalWithFreshState(runId, call, terminal, sink);
     }
 
+    /**
+     * 批量关闭工具结果。
+     *
+     * @param runId    运行ID
+     * @param terminals 工具执行结果列表
+     * @param sink     事件接收器
+     */
     public void closeTerminals(String runId, List<ToolTerminal> terminals, AgentEventSink sink) {
         if (terminals == null || terminals.isEmpty()) {
             return;
@@ -81,6 +100,16 @@ public final class ToolResultCloser {
         }
     }
 
+    /**
+     * 关闭合成的取消结果。
+     *
+     * @param runId    运行ID
+     * @param calls    被取消的工具调用列表
+     * @param reason   取消原因
+     * @param errorJson 错误JSON
+     * @param sink     事件接收器
+     * @return 合成的取消结果列表
+     */
     public List<ToolTerminal> closeSynthetic(
             String runId,
             List<ToolCall> calls,

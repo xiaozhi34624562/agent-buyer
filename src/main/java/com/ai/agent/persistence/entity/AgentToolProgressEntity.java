@@ -5,6 +5,13 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
+/**
+ * Agent工具进度实体类
+ * <p>
+ * 映射数据库表 agent_tool_progress，记录Agent工具执行过程中的进度信息，
+ * 包括执行阶段、进度消息、完成百分比等。
+ * </p>
+ */
 @TableName("agent_tool_progress")
 public class AgentToolProgressEntity {
     @TableId

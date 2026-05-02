@@ -23,8 +23,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Base class for OpenAI-compatible API providers.
- * Handles the common streaming protocol, error handling, and response parsing.
+ * OpenAI兼容API提供商适配器基类。
+ * <p>
+ * 处理OpenAI兼容协议的通用流程，包括流式请求发送、错误处理、响应解析等。
+ * 子类只需实现具体的API密钥、基础URL、超时时间等配置获取方法。
+ * </p>
  */
 public abstract class AbstractOpenAiCompatibleProviderAdapter implements LlmProviderAdapter {
     protected static final int MAX_CONNECT_RETRIES = 2;
@@ -33,6 +36,12 @@ public abstract class AbstractOpenAiCompatibleProviderAdapter implements LlmProv
     protected final HttpClient httpClient;
     protected final ProviderCompatibilityProfile compatibilityProfile;
 
+    /**
+     * 构造函数。
+     *
+     * @param objectMapper        JSON对象映射器
+     * @param compatibilityProfile 提供者兼容性配置
+     */
     protected AbstractOpenAiCompatibleProviderAdapter(
             ObjectMapper objectMapper,
             ProviderCompatibilityProfile compatibilityProfile
@@ -44,17 +53,62 @@ public abstract class AbstractOpenAiCompatibleProviderAdapter implements LlmProv
                 .build();
     }
 
+    /**
+     * 获取API密钥。
+     *
+     * @return API密钥字符串
+     */
     protected abstract String getApiKey();
+
+    /**
+     * 获取API基础URL。
+     *
+     * @return 基础URL字符串
+     */
     protected abstract String getBaseUrl();
+
+    /**
+     * 获取请求超时时间。
+     *
+     * @return 超时时间
+     */
     protected abstract Duration getRequestTimeout();
+
+    /**
+     * 获取默认模型名称。
+     *
+     * @return 默认模型名称
+     */
     protected abstract String getDefaultModel();
+
+    /**
+     * 获取提供商显示名称。
+     *
+     * @return 显示名称字符串
+     */
     protected abstract String getProviderDisplayName();
 
+    /**
+     * 返回默认模型名称。
+     *
+     * @return 默认模型名称
+     */
     @Override
     public String defaultModel() {
         return getDefaultModel();
     }
 
+    /**
+     * 执行流式聊天请求。
+     * <p>
+     * 发送HTTP请求到提供商API，处理流式响应并组装最终结果。
+     * 支持连接重试机制。
+     * </p>
+     *
+     * @param request  聊天请求
+     * @param listener 流式监听器
+     * @return 流式响应结果
+     */
     @Override
     public LlmStreamResult streamChat(LlmChatRequest request, LlmStreamListener listener) {
         String apiKey = getApiKey();
@@ -77,6 +131,14 @@ public abstract class AbstractOpenAiCompatibleProviderAdapter implements LlmProv
         throw last == null ? new IllegalStateException(getProviderDisplayName() + " request failed") : last;
     }
 
+    /**
+     * 执行实际的流式请求。
+     *
+     * @param request  聊天请求
+     * @param listener 流式监听器
+     * @param apiKey   API密钥
+     * @return 流式响应结果
+     */
     protected LlmStreamResult doStream(LlmChatRequest request, LlmStreamListener listener, String apiKey) {
         HttpRequest httpRequest = HttpRequest.newBuilder()
                 .uri(URI.create(getBaseUrl() + "/chat/completions"))
@@ -185,6 +247,12 @@ public abstract class AbstractOpenAiCompatibleProviderAdapter implements LlmProv
         );
     }
 
+    /**
+     * 将聊天请求转换为HTTP请求体JSON。
+     *
+     * @param request 聊天请求
+     * @return JSON字符串
+     */
     protected String toRequestBody(LlmChatRequest request) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", effectiveModel(request.model()));
@@ -205,6 +273,15 @@ public abstract class AbstractOpenAiCompatibleProviderAdapter implements LlmProv
         return toJson(body);
     }
 
+    /**
+     * 获取实际使用的模型名称。
+     * <p>
+     * 如果请求指定了模型则使用请求模型，否则使用默认模型。
+     * </p>
+     *
+     * @param requestedModel 请求的模型名称
+     * @return 实际使用的模型名称
+     */
     protected String effectiveModel(String requestedModel) {
         if (requestedModel != null && !requestedModel.isBlank()) {
             return requestedModel;
@@ -212,6 +289,12 @@ public abstract class AbstractOpenAiCompatibleProviderAdapter implements LlmProv
         return getDefaultModel();
     }
 
+    /**
+     * 将LLM消息转换为提供商API格式。
+     *
+     * @param message LLM消息
+     * @return 提供商API格式的消息对象
+     */
     protected Map<String, Object> toProviderMessage(LlmMessage message) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("role", message.role().name().toLowerCase());
@@ -236,6 +319,12 @@ public abstract class AbstractOpenAiCompatibleProviderAdapter implements LlmProv
         return out;
     }
 
+    /**
+     * 解析JSON字符串为JsonNode。
+     *
+     * @param payload JSON字符串
+     * @return JsonNode对象
+     */
     protected JsonNode readJson(String payload) {
         try {
             return objectMapper.readTree(payload);
@@ -244,6 +333,12 @@ public abstract class AbstractOpenAiCompatibleProviderAdapter implements LlmProv
         }
     }
 
+    /**
+     * 将对象序列化为JSON字符串。
+     *
+     * @param value 待序列化的对象
+     * @return JSON字符串
+     */
     protected String toJson(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
@@ -252,6 +347,12 @@ public abstract class AbstractOpenAiCompatibleProviderAdapter implements LlmProv
         }
     }
 
+    /**
+     * 从JsonNode读取使用量统计。
+     *
+     * @param usage 使用量JsonNode
+     * @return LlmUsage实例
+     */
     protected LlmUsage readUsage(JsonNode usage) {
         return new LlmUsage(
                 usage.path("prompt_tokens").isMissingNode() ? null : usage.path("prompt_tokens").asInt(),
@@ -260,6 +361,12 @@ public abstract class AbstractOpenAiCompatibleProviderAdapter implements LlmProv
         );
     }
 
+    /**
+     * 映射提供商的结束原因到系统定义的FinishReason。
+     *
+     * @param value 提供商的结束原因字符串
+     * @return FinishReason枚举值
+     */
     protected FinishReason mapFinishReason(String value) {
         return switch (value) {
             case "tool_calls" -> FinishReason.TOOL_CALLS;
@@ -269,20 +376,42 @@ public abstract class AbstractOpenAiCompatibleProviderAdapter implements LlmProv
         };
     }
 
+    /**
+     * 获取JsonNode的文本值，如果节点为空则返回null。
+     *
+     * @param node JsonNode对象
+     * @return 文本值或null
+     */
     protected String textOrNull(JsonNode node) {
         return node == null || node.isNull() ? null : node.asText();
     }
 
+    /**
+     * 隐藏payload中的API密钥信息。
+     *
+     * @param payload JSON字符串
+     * @return 隐藏密钥后的字符串
+     */
     protected String maskApiKey(String payload) {
         return payload.replaceAll("sk-[A-Za-z0-9_-]{12,}", "sk-***");
     }
 
+    /**
+     * 关闭错误响应的响应体流。
+     *
+     * @param response HTTP响应对象
+     */
     protected void closeErrorBody(HttpResponse<java.util.stream.Stream<String>> response) {
         try (java.util.stream.Stream<String> ignored = response.body()) {
             // Close provider error streams without storing potentially sensitive body content.
         }
     }
 
+    /**
+     * 执行退避等待。
+     *
+     * @param attempt 当前尝试次数
+     */
     protected void sleepBackoff(int attempt) {
         if (attempt >= MAX_CONNECT_RETRIES) {
             return;

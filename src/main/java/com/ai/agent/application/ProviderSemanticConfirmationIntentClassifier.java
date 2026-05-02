@@ -23,6 +23,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+/**
+ * 基于LLM提供者的语义确认意图分类器。
+ * 使用大语言模型分析用户消息，判断用户是否确认执行待处理的高风险操作。
+ * 支持主备提供者切换。
+ */
 @Service
 public final class ProviderSemanticConfirmationIntentClassifier implements SemanticConfirmationIntentClassifier {
     private static final Logger log = LoggerFactory.getLogger(ProviderSemanticConfirmationIntentClassifier.class);

@@ -5,6 +5,13 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
+/**
+ * Agent运行上下文实体类
+ * <p>
+ * 映射数据库表 agent_run_context，存储Agent运行时的上下文配置信息，
+ * 包括允许使用的工具列表、模型配置、提供商配置、最大轮次限制等。
+ * </p>
+ */
 @TableName("agent_run_context")
 public class AgentRunContextEntity {
     @TableId

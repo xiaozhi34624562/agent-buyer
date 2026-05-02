@@ -10,28 +10,62 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 技能注册表。
+ * 扫描并管理技能目录下的所有可用技能，提供预览信息查询功能。
+ */
 public class SkillRegistry {
     private static final String SKILL_MARKDOWN = "SKILL.md";
     private final List<SkillPreview> previews;
     private final Map<String, SkillPreview> previewsByName;
 
+    /**
+     * 构造技能注册表，扫描指定根目录下的所有技能。
+     *
+     * @param skillsRoot 技能根目录路径
+     */
     public SkillRegistry(Path skillsRoot) {
         this(skillsRoot, List.of());
     }
 
+    /**
+     * 构造技能注册表，仅加载指定名称的技能。
+     *
+     * @param skillsRoot        技能根目录路径
+     * @param enabledSkillNames 启用的技能名称列表
+     */
     public SkillRegistry(Path skillsRoot, List<String> enabledSkillNames) {
         this.previewsByName = loadPreviews(skillsRoot, enabledSkillNames);
         this.previews = List.copyOf(previewsByName.values());
     }
 
+    /**
+     * 获取所有技能预览列表。
+     *
+     * @return 技能预览列表
+     */
     public List<SkillPreview> previews() {
         return previews;
     }
 
+    /**
+     * 检查是否包含指定名称的技能。
+     *
+     * @param skillName 技能名称
+     * @return 如果包含则返回true
+     */
     public boolean contains(String skillName) {
         return previewsByName.containsKey(skillName);
     }
 
+    /**
+     * 加载技能预览信息。
+     *
+     * @param skillsRoot        技能根目录
+     * @param enabledSkillNames 启用的技能名称列表
+     * @return 技能名称到预览信息的映射
+     * @throws SkillRegistryException 如果加载失败
+     */
     private static Map<String, SkillPreview> loadPreviews(Path skillsRoot, List<String> enabledSkillNames) {
         if (skillsRoot == null) {
             throw new SkillRegistryException(

@@ -22,6 +22,13 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 
+/**
+ * 运行修复服务
+ * <p>
+ * 负责处理系统启动时遗留的孤儿运行和定时清理超时的确认请求，
+ * 确保系统重启后能够正确恢复未完成的运行状态。
+ * </p>
+ */
 @Component
 public final class RunRepairService {
     private static final Logger log = LoggerFactory.getLogger(RunRepairService.class);
@@ -49,6 +56,13 @@ public final class RunRepairService {
         this.confirmTokenStore = confirmTokenStore;
     }
 
+    /**
+     * 修复启动时的孤儿运行
+     * <p>
+     * 在应用启动完成后执行，查找并修复因系统重启而遗留的未完成运行，
+     * 为缺失的工具结果生成取消响应，并将运行标记为失败已恢复或超时。
+     * </p>
+     */
     @EventListener(ApplicationReadyEvent.class)
     public void repairStartupOrphans() {
         LocalDateTime cutoff = LocalDateTime.now()
@@ -78,6 +92,13 @@ public final class RunRepairService {
         }
     }
 
+    /**
+     * 清理超时的等待确认运行
+     * <p>
+     * 定时执行（每分钟），查找并处理超过确认超时时间的运行，
+     * 将其标记为超时状态并清理确认令牌。
+     * </p>
+     */
     @Scheduled(initialDelay = 60_000, fixedDelay = 60_000)
     public void expireWaitingConfirmations() {
         LocalDateTime cutoff = LocalDateTime.now().minus(properties.getConfirmationTtl());

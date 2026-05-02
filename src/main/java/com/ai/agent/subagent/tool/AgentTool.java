@@ -27,6 +27,13 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+/**
+ * 子代理工具。
+ * <p>
+ * 高成本工具，用于创建同步子代理执行，适用于需要独立上下文的任务，
+ * 如长期调查或子目标探索。单次运行最多创建2个子代理。
+ * </p>
+ */
 @Component
 public final class AgentTool extends AbstractTool {
     public static final String NAME = "agent_tool";

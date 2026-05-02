@@ -10,10 +10,20 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
+/**
+ * 工具注册表。
+ * 管理所有可用的工具，提供按名称解析和列表查询功能。
+ */
 @Component
 public final class ToolRegistry {
     private final Map<String, Tool> toolsByCanonicalName;
 
+    /**
+     * 构造工具注册表，自动索引所有工具。
+     *
+     * @param tools 所有可用的工具列表
+     * @throws IllegalStateException 如果发现规范化名称冲突
+     */
     public ToolRegistry(List<Tool> tools) {
         Map<String, Tool> next = new LinkedHashMap<>();
         tools.stream()
@@ -30,6 +40,13 @@ public final class ToolRegistry {
         this.toolsByCanonicalName = Map.copyOf(next);
     }
 
+    /**
+     * 根据名称解析工具。
+     *
+     * @param rawName 原始工具名称
+     * @return 对应的工具
+     * @throws IllegalArgumentException 如果工具名称未知
+     */
     public Tool resolve(String rawName) {
         Tool tool = toolsByCanonicalName.get(canonicalize(rawName));
         if (tool == null) {
@@ -38,10 +55,21 @@ public final class ToolRegistry {
         return tool;
     }
 
+    /**
+     * 获取所有工具列表。
+     *
+     * @return 工具集合
+     */
     public Collection<Tool> all() {
         return toolsByCanonicalName.values();
     }
 
+    /**
+     * 获取允许的工具列表。
+     *
+     * @param allowedToolNames 允许的工具名称集合，为空时返回全部
+     * @return 允许的工具列表
+     */
     public List<Tool> allowed(Set<String> allowedToolNames) {
         if (allowedToolNames == null || allowedToolNames.isEmpty()) {
             return List.copyOf(all());
@@ -55,6 +83,12 @@ public final class ToolRegistry {
                 .toList();
     }
 
+    /**
+     * 规范化工具名称，移除分隔符并转为小写。
+     *
+     * @param name 原始名称
+     * @return 规范化名称
+     */
     public static String canonicalize(String name) {
         if (name == null) {
             return "";

@@ -18,6 +18,10 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+/**
+ * 工具结果等待器。
+ * 等待工具执行完成并收集结果，支持发布订阅和轮询两种模式。
+ */
 @Component
 public final class ToolResultWaiter {
     private final RedisToolStore store;
@@ -39,6 +43,15 @@ public final class ToolResultWaiter {
         this.pubSub = pubSub;
     }
 
+    /**
+     * 等待工具调用结果。
+     *
+     * @param runId  运行ID
+     * @param calls  工具调用列表
+     * @param timeout 超时时间
+     * @return 工具执行结果列表
+     * @throws IllegalStateException 如果等待超时或被中断
+     */
     public List<ToolTerminal> awaitResults(String runId, List<ToolCall> calls, Duration timeout) {
         Instant deadline = Instant.now().plus(timeout);
         List<ToolTerminal> terminals = new ArrayList<>();

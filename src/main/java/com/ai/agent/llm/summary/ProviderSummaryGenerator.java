@@ -24,6 +24,10 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Component;
 
+/**
+ * 基于LLM提供者的摘要生成器。
+ * 使用大语言模型生成对话摘要，支持主备提供者切换。
+ */
 @Component
 public final class ProviderSummaryGenerator implements SummaryGenerator {
     private static final String SYSTEM_PROMPT = """

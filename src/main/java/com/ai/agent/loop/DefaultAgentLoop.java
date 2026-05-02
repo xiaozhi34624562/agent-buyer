@@ -37,6 +37,18 @@ import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+/**
+ * Agent运行循环的默认实现，负责协调Agent的完整执行流程。
+ * <p>
+ * 主要职责包括：
+ * <ul>
+ *     <li>创建新运行并初始化运行上下文</li>
+ *     <li>组装系统提示词和用户消息</li>
+ *     <li>处理用户确认流程（HITL）</li>
+ *     <li>协调多轮对话执行直到终止条件</li>
+ * </ul>
+ * </p>
+ */
 @Service
 public final class DefaultAgentLoop implements AgentLoop {
     private static final Logger log = LoggerFactory.getLogger(DefaultAgentLoop.class);
@@ -57,6 +69,21 @@ public final class DefaultAgentLoop implements AgentLoop {
     private final ConfirmTokenStore confirmTokenStore;
     private final PendingConfirmToolStore pendingConfirmToolStore;
 
+    /**
+     * 构造函数，注入所有必要的依赖组件。
+     *
+     * @param properties            Agent配置属性
+     * @param promptAssembler       系统提示词组装器
+     * @param toolRegistry          工具注册表
+     * @param trajectoryStore       运行轨迹存储
+     * @param runContextStore       运行上下文存储
+     * @param sinkRegistry          SSE事件接收器注册表
+     * @param runAccessManager      运行访问管理器
+     * @param turnOrchestrator      单轮执行编排器
+     * @param humanIntentResolver   用户意图解析器
+     * @param confirmTokenStore     确认令牌存储
+     * @param pendingConfirmToolStore 待确认工具存储
+     */
     @Autowired
     public DefaultAgentLoop(
             AgentProperties properties,
@@ -85,6 +112,24 @@ public final class DefaultAgentLoop implements AgentLoop {
         this.pendingConfirmToolStore = pendingConfirmToolStore;
     }
 
+    /**
+     * 创建并执行一个新的Agent运行。
+     * <p>
+     * 执行流程：
+     * <ol>
+     *     <li>生成运行ID并设置MDC日志上下文</li>
+     *     <li>解析允许使用的工具列表</li>
+     *     <li>创建运行上下文并持久化</li>
+     *     <li>组装并保存系统提示词和用户消息</li>
+     *     <li>启动运行状态机并执行直到终止</li>
+     * </ol>
+     * </p>
+     *
+     * @param userId  用户标识
+     * @param request 运行请求，包含初始消息和配置参数
+     * @param sink    SSE事件接收器，用于推送执行过程事件
+     * @return 运行结果，包含运行ID、最终状态和输出内容
+     */
     @Override
     public AgentRunResult run(String userId, AgentRunRequest request, AgentEventSink sink) {
         String runId = Ids.newId("run");
@@ -119,6 +164,15 @@ public final class DefaultAgentLoop implements AgentLoop {
         }
     }
 
+    /**
+     * 继续一个已暂停的Agent运行（自动获取继续许可）。
+     *
+     * @param userId  用户标识
+     * @param runId   运行标识
+     * @param message 用户输入的后续消息
+     * @param sink    SSE事件接收器
+     * @return 运行结果
+     */
     @Override
     public AgentRunResult continueRun(String userId, String runId, UserMessage message, AgentEventSink sink) {
         try (MDC.MDCCloseable ignoredRun = MDC.putCloseable("runId", runId);
@@ -128,6 +182,16 @@ public final class DefaultAgentLoop implements AgentLoop {
         }
     }
 
+    /**
+     * 继续一个已暂停的Agent运行（使用预先获取的继续许可）。
+     *
+     * @param userId  用户标识
+     * @param runId   运行标识
+     * @param message 用户输入的后续消息
+     * @param sink    SSE事件接收器
+     * @param permit  继续运行许可，由RunAccessManager颁发
+     * @return 运行结果
+     */
     @Override
     public AgentRunResult continueRun(
             String userId,
@@ -142,6 +206,24 @@ public final class DefaultAgentLoop implements AgentLoop {
         }
     }
 
+    /**
+     * 使用许可继续运行的核心实现。
+     * <p>
+     * 处理用户确认流程的三种意图：
+     * <ul>
+     *     <li>REJECT：取消操作，清理待确认工具，返回成功状态</li>
+     *     <li>CLARIFY：请求用户明确确认，保持等待状态</li>
+     *     <li>CONFIRM：执行待确认的工具并返回结果</li>
+     * </ul>
+     * </p>
+     *
+     * @param userId  用户标识
+     * @param runId   运行标识
+     * @param message 用户输入的后续消息
+     * @param sink    SSE事件接收器
+     * @param permit  继续运行许可
+     * @return 运行结果
+     */
     private AgentRunResult continueRunWithPermit(
             String userId,
             String runId,

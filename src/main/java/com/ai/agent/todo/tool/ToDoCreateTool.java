@@ -24,6 +24,10 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+/**
+ * ToDo创建工具。
+ * 创建或替换Agent的短期任务计划，用于跟踪当前运行中的待办事项。
+ */
 @Component
 public final class ToDoCreateTool extends AbstractTool {
     private static final String SCHEMA = """
@@ -68,6 +72,11 @@ public final class ToDoCreateTool extends AbstractTool {
         this.trajectoryWriter = trajectoryWriter;
     }
 
+    /**
+     * 获取工具Schema定义。
+     *
+     * @return 工具Schema
+     */
     @Override
     public ToolSchema schema() {
         return new ToolSchema(
@@ -82,6 +91,13 @@ public final class ToDoCreateTool extends AbstractTool {
         );
     }
 
+    /**
+     * 验证工具参数。
+     *
+     * @param ctx  工具使用上下文
+     * @param use  工具使用请求
+     * @return 验证结果
+     */
     @Override
     public ToolValidation validate(ToolUseContext ctx, ToolUse use) {
         try {
@@ -100,6 +116,15 @@ public final class ToDoCreateTool extends AbstractTool {
         }
     }
 
+    /**
+     * 执行ToDo创建操作。
+     *
+     * @param ctx              工具执行上下文
+     * @param running          已启动的工具实例
+     * @param normalizedArgsJson 标准化后的参数JSON
+     * @param token            取消令牌
+     * @return 工具执行结果
+     */
     @Override
     protected ToolTerminal doRun(ToolExecutionContext ctx, StartedTool running, String normalizedArgsJson, CancellationToken token) throws Exception {
         CreateArgs args = objectMapper.readValue(normalizedArgsJson, CreateArgs.class);

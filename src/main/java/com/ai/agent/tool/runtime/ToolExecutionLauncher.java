@@ -19,6 +19,12 @@ import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
+/**
+ * 工具执行启动器，负责调度和执行已就绪的工具。
+ *
+ * <p>从Redis队列获取待执行工具，通过线程池提交执行任务，
+ * 处理执行结果并触发后续调度。支持执行被拒绝时的优雅降级处理。
+ */
 @Component
 public final class ToolExecutionLauncher {
     private static final Logger log = LoggerFactory.getLogger(ToolExecutionLauncher.class);
@@ -46,10 +52,21 @@ public final class ToolExecutionLauncher {
         this.toolExecutor = toolExecutor;
     }
 
+    /**
+     * 触发运行的调度执行。
+     *
+     * @param runId 运行标识符
+     */
     public void drainRun(String runId) {
         launchScheduled(runId, store.schedule(runId));
     }
 
+    /**
+     * 启动已调度工具的执行。
+     *
+     * @param runId 运行标识符
+     * @param startedTools 已调度的工具列表
+     */
     public void launchScheduled(String runId, List<StartedTool> startedTools) {
         if (startedTools == null || startedTools.isEmpty()) {
             return;
@@ -65,6 +82,12 @@ public final class ToolExecutionLauncher {
         }
     }
 
+    /**
+     * 处理执行被拒绝的工具。
+     *
+     * @param tool 被拒绝的工具
+     * @param e 拒绝异常
+     */
     private void completeRejected(StartedTool tool, RejectedExecutionException e) {
         log.error("tool execution rejected by executor toolName={} toolCallId={}", tool.call().toolName(), tool.call().toolCallId(), e);
         ToolTerminal terminal = ToolTerminal.syntheticCancelled(
@@ -77,6 +100,11 @@ public final class ToolExecutionLauncher {
         }
     }
 
+    /**
+     * 执行单个工具，设置MDC上下文。
+     *
+     * @param started 待执行的工具
+     */
     private void execute(StartedTool started) {
         try (MDC.MDCCloseable ignoredRun = MDC.putCloseable("runId", started.call().runId());
              MDC.MDCCloseable ignoredTool = MDC.putCloseable("toolCallId", started.call().toolCallId())) {
@@ -84,6 +112,11 @@ public final class ToolExecutionLauncher {
         }
     }
 
+    /**
+     * 执行单个工具的核心逻辑。
+     *
+     * @param started 待执行的工具
+     */
     private void executeWithMdc(StartedTool started) {
         ToolTerminal terminal;
         try {
@@ -129,6 +162,11 @@ public final class ToolExecutionLauncher {
         drainRun(started.call().runId());
     }
 
+    /**
+     * 发布工具执行完成通知。
+     *
+     * @param started 已完成的工具
+     */
     private void publishCompleted(StartedTool started) {
         try {
             toolResultPubSub.publish(started.call().runId(), started.call().toolCallId());
@@ -152,6 +190,12 @@ public final class ToolExecutionLauncher {
         });
     }
 
+    /**
+     * 在指定MDC上下文中运行任务。
+     *
+     * @param context MDC上下文
+     * @param task 待执行任务
+     */
     private void runWithMdc(Map<String, String> context, Runnable task) {
         Map<String, String> previous = MDC.getCopyOfContextMap();
         try {
@@ -170,10 +214,17 @@ public final class ToolExecutionLauncher {
         }
     }
 
+    /**
+     * 转义JSON字符串中的特殊字符。
+     *
+     * @param value 原始字符串
+     * @return 转义后的字符串
+     */
     private String escape(String value) {
         return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
+    /** 空实现的AgentEventSink，用于无事件推送时的占位 */
     private enum AgentEventSinkNoop implements com.ai.agent.web.sse.AgentEventSink {
         INSTANCE;
 

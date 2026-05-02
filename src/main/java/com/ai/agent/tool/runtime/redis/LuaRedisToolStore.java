@@ -21,6 +21,10 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
+/**
+ * 基于Lua脚本的Redis工具存储实现。
+ * 使用Redis Lua脚本实现原子性的工具状态管理操作。
+ */
 @Repository
 public class LuaRedisToolStore implements RedisToolStore {
     private static final DefaultRedisScript<Long> INGEST_SCRIPT =

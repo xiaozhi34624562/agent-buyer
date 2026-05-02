@@ -25,6 +25,10 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Component;
 
+/**
+ * 取消订单工具。
+ * 支持订单取消的预检查（dry-run）和实际取消操作，需要用户确认后执行。
+ */
 @Component
 public final class CancelOrderTool extends AbstractTool {
     private static final String SCHEMA = """
@@ -62,6 +66,11 @@ public final class CancelOrderTool extends AbstractTool {
         this.argumentsHasher = argumentsHasher;
     }
 
+    /**
+     * 获取工具Schema定义。
+     *
+     * @return 工具Schema
+     */
     @Override
     public ToolSchema schema() {
         return new ToolSchema(
@@ -76,6 +85,13 @@ public final class CancelOrderTool extends AbstractTool {
         );
     }
 
+    /**
+     * 验证工具参数。
+     *
+     * @param ctx  工具使用上下文
+     * @param use  工具使用请求
+     * @return 验证结果
+     */
     @Override
     public ToolValidation validate(ToolUseContext ctx, ToolUse use) {
         try {
@@ -95,6 +111,15 @@ public final class CancelOrderTool extends AbstractTool {
         }
     }
 
+    /**
+     * 执行订单取消操作。
+     *
+     * @param ctx              工具执行上下文
+     * @param running          已启动的工具实例
+     * @param normalizedArgsJson 标准化后的参数JSON
+     * @param token            取消令牌
+     * @return 工具执行结果
+     */
     @Override
     protected ToolTerminal doRun(
             ToolExecutionContext ctx,

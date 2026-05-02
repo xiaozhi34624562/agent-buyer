@@ -6,6 +6,13 @@ import java.util.List;
 import java.util.Set;
 import org.springframework.stereotype.Component;
 
+/**
+ * 探索型子代理配置。
+ * <p>
+ * 用于订单/业务调查场景，继承父代理的查询类工具能力，
+ * 不执行写入操作，返回事实、不确定性和建议的下一步。
+ * </p>
+ */
 @Component
 public final class ExploreAgentProfile implements SubAgentProfile {
     private static final Set<String> EXPLORE_TOOLS = Set.of("query_order", "skill_list", "skill_view");

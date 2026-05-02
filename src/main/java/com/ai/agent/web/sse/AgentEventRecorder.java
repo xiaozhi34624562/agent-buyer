@@ -14,6 +14,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
+/**
+ * Agent 事件记录器。
+ *
+ * <p>异步持久化 Agent 运行事件到数据库，支持事件数据和工具进度数据的分别存储，
+ * 并对敏感数据进行脱敏处理。
+ *
+ * @author AI Agent
+ */
 @Component
 public final class AgentEventRecorder {
     private static final Logger log = LoggerFactory.getLogger(AgentEventRecorder.class);
@@ -24,6 +32,15 @@ public final class AgentEventRecorder {
     private final ExecutorService eventExecutor;
     private final MeterRegistry meterRegistry;
 
+    /**
+     * 构造事件记录器。
+     *
+     * @param eventMapper      事件数据 Mapper
+     * @param progressMapper   工具进度数据 Mapper
+     * @param sanitizer        敏感数据脱敏处理器
+     * @param eventExecutor    事件写入异步执行器
+     * @param meterRegistry    Micrometer 指标注册器
+     */
     public AgentEventRecorder(
             AgentEventMapper eventMapper,
             AgentToolProgressMapper progressMapper,
@@ -38,6 +55,13 @@ public final class AgentEventRecorder {
         this.meterRegistry = meterRegistry;
     }
 
+    /**
+     * 异步记录事件数据。
+     *
+     * @param runId      运行实例 ID
+     * @param eventType  事件类型
+     * @param payload    事件数据对象
+     */
     public void recordEvent(String runId, String eventType, Object payload) {
         submit(() -> {
             AgentEventEntity entity = new AgentEventEntity();
@@ -49,6 +73,11 @@ public final class AgentEventRecorder {
         }, "event");
     }
 
+    /**
+     * 异步记录工具进度数据。
+     *
+     * @param event 工具进度事件
+     */
     public void recordProgress(ToolProgressEvent event) {
         submit(() -> {
             AgentToolProgressEntity entity = new AgentToolProgressEntity();
@@ -62,6 +91,12 @@ public final class AgentEventRecorder {
         }, "progress");
     }
 
+    /**
+     * 提交异步写入任务。
+     *
+     * @param task 写入任务
+     * @param type 任务类型标识
+     */
     private void submit(Runnable task, String type) {
         try {
             eventExecutor.submit(() -> {
@@ -79,6 +114,12 @@ public final class AgentEventRecorder {
         }
     }
 
+    /**
+     * 将对象转换为脱敏后的 JSON 字符串。
+     *
+     * @param value 待转换对象
+     * @return 脱敏后的 JSON 字符串
+     */
     private String toJson(Object value) {
         if (value == null) {
             return null;

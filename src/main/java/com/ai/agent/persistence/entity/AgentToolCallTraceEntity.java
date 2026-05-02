@@ -6,6 +6,13 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
+/**
+ * Agent工具调用追踪实体类
+ * <p>
+ * 映射数据库表 agent_tool_call_trace，记录Agent执行过程中每次工具调用的详细信息，
+ * 包括工具名称、调用参数、并发状态、幂等性标识等。
+ * </p>
+ */
 @TableName("agent_tool_call_trace")
 public class AgentToolCallTraceEntity {
     @TableId

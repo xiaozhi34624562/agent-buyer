@@ -5,6 +5,13 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
+/**
+ * Agent运行实体类
+ * <p>
+ * 映射数据库表 agent_run，存储Agent每次运行的核心状态信息，
+ * 包括会话ID、用户ID、运行状态、轮次计数、父运行关联、Agent类型等。
+ * </p>
+ */
 @TableName("agent_run")
 public class AgentRunEntity {
     @TableId

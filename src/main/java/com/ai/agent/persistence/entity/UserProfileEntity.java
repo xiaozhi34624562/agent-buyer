@@ -3,6 +3,12 @@ package com.ai.agent.persistence.entity;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
+/**
+ * 用户档案实体类
+ * <p>
+ * 映射数据库表 user_profile，存储用户的基本信息，包括用户ID、显示名称、联系方式等。
+ * </p>
+ */
 @TableName("user_profile")
 public class UserProfileEntity {
     @TableId

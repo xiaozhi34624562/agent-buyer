@@ -10,15 +10,34 @@ import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.List;
 
+/**
+ * 管理后台运行列表查询服务。
+ *
+ * <p>提供 Agent 运行列表的查询功能，支持按状态和用户 ID 筛选，
+ * 返回包含运行基本信息和上下文配置的完整数据。
+ *
+ * @author AI Agent
+ */
 @Service
 public class AdminRunListService {
 
     private final JdbcTemplate jdbcTemplate;
 
+    /**
+     * 构造运行列表服务。
+     *
+     * @param jdbcTemplate JDBC 模板
+     */
     public AdminRunListService(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
     }
 
+    /**
+     * 查询运行列表。
+     *
+     * @param query 查询参数，包含分页和筛选条件
+     * @return 运行列表数据
+     */
     public List<AdminRunListDto> listRuns(AdminRunListQuery query) {
         int offset = query.getOffset();
         int limit = query.getClampedPageSize();
@@ -73,6 +92,14 @@ public class AdminRunListService {
         );
     }
 
+    /**
+     * 将数据库行映射为 DTO 对象。
+     *
+     * @param rs     结果集
+     * @param rowNum 行号
+     * @return 映射后的 DTO
+     * @throws SQLException SQL 异常
+     */
     private AdminRunListDto mapRow(ResultSet rs, int rowNum) throws SQLException {
         return new AdminRunListDto(
                 rs.getString("run_id"),

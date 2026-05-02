@@ -5,6 +5,13 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
+/**
+ * Agent事件实体类
+ * <p>
+ * 映射数据库表 agent_event，记录Agent运行过程中产生的各类事件，
+ * 包括事件类型、事件详情JSON payload等。
+ * </p>
+ */
 @TableName("agent_event")
 public class AgentEventEntity {
     @TableId

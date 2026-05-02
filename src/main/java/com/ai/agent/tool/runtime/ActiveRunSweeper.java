@@ -14,6 +14,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+/**
+ * 活跃运行清扫器，定期扫描并调度活跃运行中的待执行工具。
+ *
+ * <p>通过定时任务检查活跃运行队列，触发待执行工具的调度，
+ * 并清理已完成或过期的活跃运行记录。
+ */
 @Component
 public final class ActiveRunSweeper {
     private static final Logger log = LoggerFactory.getLogger(ActiveRunSweeper.class);
@@ -35,6 +41,11 @@ public final class ActiveRunSweeper {
         this.runMapper = runMapper;
     }
 
+    /**
+     * 定时扫描活跃运行并调度执行。
+     *
+     * <p>检查所有活跃运行，清理已完成的运行，调度待执行的工具。
+     */
     @Scheduled(fixedDelayString = "${agent.runtime.active-run-sweeper-interval-ms:2000}")
     public void sweep() {
         if (!properties.getRuntime().isActiveRunSweeperEnabled()) {
@@ -49,6 +60,12 @@ public final class ActiveRunSweeper {
         }
     }
 
+    /**
+     * 清理已终止的运行。
+     *
+     * @param runId 运行标识符
+     * @return 如果运行已终止并清理成功则返回true，否则返回false
+     */
     private boolean cleanupTerminalRun(String runId) {
         AgentRunEntity run = runMapper.selectById(runId);
         if (run == null) {
@@ -73,6 +90,12 @@ public final class ActiveRunSweeper {
         return false;
     }
 
+    /**
+     * 检查运行状态是否为终止状态。
+     *
+     * @param status 运行状态
+     * @return 如果为终止状态则返回true，否则返回false
+     */
     private boolean isTerminal(RunStatus status) {
         return status == RunStatus.SUCCEEDED
                 || status == RunStatus.FAILED

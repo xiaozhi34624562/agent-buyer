@@ -19,6 +19,13 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
+/**
+ * 基于Redis的子运行注册表实现。
+ * <p>
+ * 使用Redis Lua脚本保证子运行预留和释放操作的原子性，
+ * 支持并发限制、预算控制等功能。
+ * </p>
+ */
 @Component
 public final class RedisChildRunRegistry implements ChildRunRegistry {
     private static final int CHILD_KEY_TTL_SECONDS = 7 * 24 * 60 * 60;

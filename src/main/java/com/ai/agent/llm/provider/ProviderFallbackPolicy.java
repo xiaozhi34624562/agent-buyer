@@ -6,6 +6,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.Optional;
 
+/**
+ * 提供者故障转移策略。
+ * 根据运行上下文和失败类型，决定是否切换到备用LLM提供者。
+ */
 public final class ProviderFallbackPolicy {
     private final ObjectMapper objectMapper;
 
@@ -13,6 +17,13 @@ public final class ProviderFallbackPolicy {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 选择故障转移的目标提供者。
+     *
+     * @param runContext 运行上下文
+     * @param failure    导致故障转移的异常
+     * @return 如果应切换到备用提供者则返回其名称，否则返回空
+     */
     public Optional<String> selectFallbackProvider(RunContext runContext, Exception failure) {
         if (!isFallbackEnabled(runContext.providerOptions())) {
             return Optional.empty();

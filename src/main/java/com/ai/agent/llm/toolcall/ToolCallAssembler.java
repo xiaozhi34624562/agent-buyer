@@ -6,9 +6,21 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 工具调用组装器。
+ * 用于将流式输出中的增量工具调用片段组装成完整的工具调用消息。
+ */
 public final class ToolCallAssembler {
     private final Map<Integer, PartialToolCall> partials = new HashMap<>();
 
+    /**
+     * 追加增量内容到指定索引的工具调用。
+     *
+     * @param index         工具调用索引
+     * @param id            工具调用ID增量
+     * @param nameDelta     工具名称增量
+     * @param argumentsDelta 参数JSON增量
+     */
     public void append(int index, String id, String nameDelta, String argumentsDelta) {
         PartialToolCall partial = partials.computeIfAbsent(index, ignored -> new PartialToolCall());
         if (id != null && !id.isBlank()) {
@@ -22,6 +34,11 @@ public final class ToolCallAssembler {
         }
     }
 
+    /**
+     * 完成组装，返回所有完整的工具调用消息。
+     *
+     * @return 按索引排序的工具调用消息列表
+     */
     public List<ToolCallMessage> complete() {
         return partials.entrySet().stream()
                 .sorted(Comparator.comparingInt(Map.Entry::getKey))

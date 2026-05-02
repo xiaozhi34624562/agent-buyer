@@ -5,6 +5,13 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
+/**
+ * Agent LLM调用尝试实体类
+ * <p>
+ * 映射数据库表 agent_llm_attempt，记录Agent每次调用LLM的详细信息，
+ * 包括模型提供商、模型名称、Token消耗、调用状态等。
+ * </p>
+ */
 @TableName("agent_llm_attempt")
 public class AgentLlmAttemptEntity {
     @TableId

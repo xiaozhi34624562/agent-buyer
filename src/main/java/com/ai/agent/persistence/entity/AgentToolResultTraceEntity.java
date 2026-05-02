@@ -5,6 +5,13 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
+/**
+ * Agent工具结果追踪实体类
+ * <p>
+ * 映射数据库表 agent_tool_result_trace，记录Agent工具调用执行后的结果信息，
+ * 包括执行状态、结果数据、错误信息等。
+ * </p>
+ */
 @TableName("agent_tool_result_trace")
 public class AgentToolResultTraceEntity {
     @TableId

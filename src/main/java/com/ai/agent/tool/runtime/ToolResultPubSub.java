@@ -19,6 +19,12 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+/**
+ * 工具结果发布订阅组件，用于实时通知工具执行完成事件。
+ *
+ * <p>通过Redis Pub/Sub机制，实现跨实例的工具执行完成通知，
+ * 减少结果等待的轮询开销，提升响应速度。
+ */
 @Component
 public final class ToolResultPubSub implements MessageListener {
     private static final Logger log = LoggerFactory.getLogger(ToolResultPubSub.class);
@@ -43,6 +49,13 @@ public final class ToolResultPubSub implements MessageListener {
         listenerContainer.addMessageListener(this, new PatternTopic(keys.resultChannelPattern()));
     }
 
+    /**
+     * 注册等待工具执行完成的Future。
+     *
+     * @param runId 运行标识符
+     * @param toolCallId 工具调用标识符
+     * @return 完成时会被触发的Future
+     */
     public CompletableFuture<Void> waitFor(String runId, String toolCallId) {
         if (!properties.getRuntime().isToolResultPubsubEnabled()) {
             return new CompletableFuture<>();
@@ -53,6 +66,13 @@ public final class ToolResultPubSub implements MessageListener {
         return future;
     }
 
+    /**
+     * 取消等待Future的注册。
+     *
+     * @param runId 运行标识符
+     * @param toolCallId 工具调用标识符
+     * @param future 待取消的Future
+     */
     public void cancelWait(String runId, String toolCallId, CompletableFuture<Void> future) {
         if (future == null) {
             return;
@@ -68,6 +88,12 @@ public final class ToolResultPubSub implements MessageListener {
         }
     }
 
+    /**
+     * 发布工具执行完成通知。
+     *
+     * @param runId 运行标识符
+     * @param toolCallId 工具调用标识符
+     */
     public void publish(String runId, String toolCallId) {
         if (!properties.getRuntime().isToolResultPubsubEnabled()) {
             return;
@@ -76,6 +102,12 @@ public final class ToolResultPubSub implements MessageListener {
         redisTemplate.convertAndSend(keys.resultChannel(runId), payload(runId, toolCallId));
     }
 
+    /**
+     * 处理Redis消息，完成本地等待的Future。
+     *
+     * @param message Redis消息
+     * @param pattern 订阅模式
+     */
     @Override
     public void onMessage(Message message, byte[] pattern) {
         String body = new String(message.getBody(), StandardCharsets.UTF_8);
@@ -87,6 +119,12 @@ public final class ToolResultPubSub implements MessageListener {
         }
     }
 
+    /**
+     * 完成本地等待的Future。
+     *
+     * @param runId 运行标识符
+     * @param toolCallId 工具调用标识符
+     */
     private void completeLocal(String runId, String toolCallId) {
         CopyOnWriteArrayList<CompletableFuture<Void>> futures = waiters.remove(waiterKey(runId, toolCallId));
         if (futures == null) {
@@ -97,6 +135,13 @@ public final class ToolResultPubSub implements MessageListener {
         }
     }
 
+    /**
+     * 构建通知消息JSON。
+     *
+     * @param runId 运行标识符
+     * @param toolCallId 工具调用标识符
+     * @return JSON字符串
+     */
     private String payload(String runId, String toolCallId) {
         try {
             return objectMapper.writeValueAsString(new ResultNotification(runId, toolCallId));
@@ -105,10 +150,18 @@ public final class ToolResultPubSub implements MessageListener {
         }
     }
 
+    /**
+     * 构建等待器键。
+     *
+     * @param runId 运行标识符
+     * @param toolCallId 工具调用标识符
+     * @return 等待器键字符串
+     */
     private String waiterKey(String runId, String toolCallId) {
         return runId + ":" + toolCallId;
     }
 
+    /** 结果通知内部记录 */
     private record ResultNotification(String runId, String toolCallId) {
     }
 }

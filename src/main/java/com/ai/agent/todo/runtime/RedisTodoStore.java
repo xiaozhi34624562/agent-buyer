@@ -16,8 +16,15 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Repository;
 
+/**
+ * Redis Todo 存储实现。
+ * <p>
+ * 使用 Redis HASH 存储 Todo 步骤，支持原子性替换计划和状态更新。
+ * </p>
+ */
 @Repository
 public class RedisTodoStore implements TodoStore {
+    /** 替换计划的 Lua 脚本 */
     private static final DefaultRedisScript<Long> REPLACE_PLAN_SCRIPT =
             RedisLuaScripts.load("redis/todo/replace-plan.lua", Long.class);
 
@@ -25,12 +32,29 @@ public class RedisTodoStore implements TodoStore {
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
 
+    /**
+     * 构造 Redis Todo 存储。
+     *
+     * @param redisTemplate Redis 操作模板
+     * @param keys          Redis key 生成器
+     * @param objectMapper  JSON 序列化器
+     */
     public RedisTodoStore(RedisKeys keys, StringRedisTemplate redisTemplate, ObjectMapper objectMapper) {
         this.keys = keys;
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 替换 Todo 计划。
+     * <p>
+     * 使用 Lua 脚本原子性清空旧计划并写入新步骤。
+     * </p>
+     *
+     * @param runId 运行标识
+     * @param items Todo 草稿列表
+     * @return 创建的 Todo 步骤列表
+     */
     @Override
     public List<TodoStep> replacePlan(String runId, List<TodoDraft> items) {
         if (items == null || items.isEmpty()) {

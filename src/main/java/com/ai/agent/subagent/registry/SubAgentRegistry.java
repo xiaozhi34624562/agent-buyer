@@ -7,6 +7,12 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Component;
 
+/**
+ * 子代理配置注册表。
+ * <p>
+ * 管理所有子代理配置的注册和查找，支持按代理类型获取配置。
+ * </p>
+ */
 @Component
 public final class SubAgentRegistry {
     private final Map<String, SubAgentProfile> profilesByType;

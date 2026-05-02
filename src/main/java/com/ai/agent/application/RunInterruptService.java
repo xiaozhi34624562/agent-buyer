@@ -16,6 +16,13 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 
+/**
+ * 运行中断服务
+ * <p>
+ * 负责处理用户发起的运行中断请求，包括关闭正在执行的工具调用、
+ * 中断子运行、更新运行状态等操作，使运行进入暂停状态。
+ * </p>
+ */
 @Service
 public final class RunInterruptService {
     private static final Logger log = LoggerFactory.getLogger(RunInterruptService.class);
@@ -49,6 +56,17 @@ public final class RunInterruptService {
         this.trajectoryStore = trajectoryStore;
     }
 
+    /**
+     * 中断指定运行
+     * <p>
+     * 执行中断操作：校验用户权限、检查运行状态、中断工具调用、中断子运行、更新状态。
+     * </p>
+     *
+     * @param userId 用户ID
+     * @param runId  运行ID
+     * @return 中断响应结果，包含运行状态、是否变更、被中断的子运行数量等
+     * @throws InterruptDisabledException 当中断功能被禁用时抛出
+     */
     public InterruptRunResponse interrupt(String userId, String runId) {
         if (!properties.getRuntime().isInterruptEnabled()) {
             throw new InterruptDisabledException();
@@ -81,6 +99,15 @@ public final class RunInterruptService {
         );
     }
 
+    /**
+     * 判断运行状态是否为终态
+     * <p>
+     * 终态包括：成功、失败、失败已恢复、取消、超时。
+     * </p>
+     *
+     * @param status 运行状态
+     * @return true表示为终态，false表示非终态
+     */
     private boolean isTerminal(RunStatus status) {
         return status == RunStatus.SUCCEEDED
                 || status == RunStatus.FAILED
@@ -89,6 +116,15 @@ public final class RunInterruptService {
                 || status == RunStatus.TIMEOUT;
     }
 
+    /**
+     * 中断父运行下的所有活跃子运行
+     * <p>
+     * 遍历所有活跃子运行，执行工具中断、状态更新、父子链接释放等操作。
+     * </p>
+     *
+     * @param parentRunId 父运行ID
+     * @return 被中断的子运行数量
+     */
     private int interruptChildren(String parentRunId) {
         int count = 0;
         for (var child : childRunRegistry.findActiveChildren(parentRunId)) {
@@ -106,6 +142,9 @@ public final class RunInterruptService {
         return count;
     }
 
+    /**
+     * 中断运行响应结果
+     */
     public record InterruptRunResponse(
             String runId,
             RunStatus status,
@@ -115,6 +154,12 @@ public final class RunInterruptService {
     ) {
     }
 
+    /**
+     * 中断功能禁用异常
+     * <p>
+     * 当系统配置禁用了中断功能时抛出此异常。
+     * </p>
+     */
     public static final class InterruptDisabledException extends RuntimeException {
     }
 }

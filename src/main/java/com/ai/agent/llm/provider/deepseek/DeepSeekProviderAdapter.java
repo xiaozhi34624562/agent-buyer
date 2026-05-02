@@ -7,6 +7,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import org.springframework.stereotype.Component;
 
+/**
+ * DeepSeek提供者适配器。
+ * 适配DeepSeek大语言模型，支持OpenAI兼容接口。
+ */
 @Component
 public final class DeepSeekProviderAdapter extends AbstractOpenAiCompatibleProviderAdapter {
     private static final String PROVIDER_NAME = "deepseek";

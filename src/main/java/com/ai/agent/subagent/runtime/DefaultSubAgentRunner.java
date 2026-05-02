@@ -43,6 +43,13 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
+/**
+ * 默认子代理运行器实现。
+ * <p>
+ * 提供子代理的完整执行流程，包括资源预留、轨迹创建、消息初始化、
+ * 运行监控、异常处理和资源释放等功能。
+ * </p>
+ */
 @Lazy
 @Service
 public final class DefaultSubAgentRunner implements SubAgentRunner {

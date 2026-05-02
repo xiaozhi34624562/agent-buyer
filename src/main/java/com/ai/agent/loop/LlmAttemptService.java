@@ -27,6 +27,18 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
 
+/**
+ * LLM调用尝试服务，负责执行单次LLM调用并记录调用轨迹。
+ * <p>
+ * 主要职责包括：
+ * <ul>
+ *     <li>执行LLM流式调用并推送文本增量事件</li>
+ *     <li>处理Provider降级和故障转移</li>
+ *     <li>记录上下文压缩轨迹</li>
+ *     <li>持久化LLM调用尝试结果</li>
+ * </ul>
+ * </p>
+ */
 @Service
 public final class LlmAttemptService {
     private final LlmProviderAdapterRegistry providerRegistry;
@@ -35,6 +47,14 @@ public final class LlmAttemptService {
     private final ObjectMapper objectMapper;
     private final ProviderFallbackPolicy fallbackPolicy;
 
+    /**
+     * 构造函数，注入所有必要的依赖组件。
+     *
+     * @param providerRegistry  Provider适配器注册表
+     * @param trajectoryStore   运行轨迹存储
+     * @param objectMapper      JSON对象映射器
+     * @param compactionStore   上下文压缩存储
+     */
     public LlmAttemptService(
             LlmProviderAdapterRegistry providerRegistry,
             TrajectoryStore trajectoryStore,
@@ -48,6 +68,21 @@ public final class LlmAttemptService {
         this.fallbackPolicy = new ProviderFallbackPolicy(objectMapper);
     }
 
+    /**
+     * 执行单次LLM调用尝试（简化版本，无上下文压缩）。
+     *
+     * @param runId         运行标识
+     * @param turnNo        轮次编号
+     * @param attemptId     尝试标识
+     * @param providerName  Provider名称
+     * @param model         模型名称
+     * @param params        LLM参数配置
+     * @param messages      消息列表
+     * @param allowedTools  允许使用的工具列表
+     * @param sink          SSE事件接收器
+     * @return LLM流式结果
+     * @throws Exception 调用失败时抛出异常
+     */
     public LlmStreamResult executeAttempt(
             String runId,
             int turnNo,
@@ -62,6 +97,22 @@ public final class LlmAttemptService {
         return executeAttempt(runId, turnNo, attemptId, providerName, model, params, messages, allowedTools, List.of(), sink);
     }
 
+    /**
+     * 执行单次LLM调用尝试（带上下文压缩）。
+     *
+     * @param runId         运行标识
+     * @param turnNo        轮次编号
+     * @param attemptId     尝试标识
+     * @param providerName  Provider名称
+     * @param model         模型名称
+     * @param params        LLM参数配置
+     * @param messages      消息列表
+     * @param allowedTools  允许使用的工具列表
+     * @param compactions   上下文压缩记录列表
+     * @param sink          SSE事件接收器
+     * @return LLM流式结果
+     * @throws Exception 调用失败时抛出异常
+     */
     public LlmStreamResult executeAttempt(
             String runId,
             int turnNo,
@@ -89,6 +140,21 @@ public final class LlmAttemptService {
         );
     }
 
+    /**
+     * 执行单次LLM调用尝试（带运行上下文，无上下文压缩）。
+     *
+     * @param runId         运行标识
+     * @param turnNo        轮次编号
+     * @param attemptId     尝试标识
+     * @param runContext    运行上下文，包含Provider配置
+     * @param model         模型名称
+     * @param params        LLM参数配置
+     * @param messages      消息列表
+     * @param allowedTools  允许使用的工具列表
+     * @param sink          SSE事件接收器
+     * @return LLM流式结果
+     * @throws Exception 调用失败时抛出异常
+     */
     public LlmStreamResult executeAttempt(
             String runId,
             int turnNo,
@@ -103,6 +169,22 @@ public final class LlmAttemptService {
         return executeAttempt(runId, turnNo, attemptId, runContext, model, params, messages, allowedTools, sink, LlmCallObserver.NOOP);
     }
 
+    /**
+     * 执行单次LLM调用尝试（带运行上下文和上下文压缩）。
+     *
+     * @param runId         运行标识
+     * @param turnNo        轮次编号
+     * @param attemptId     尝试标识
+     * @param runContext    运行上下文，包含Provider配置
+     * @param model         模型名称
+     * @param params        LLM参数配置
+     * @param messages      消息列表
+     * @param allowedTools  允许使用的工具列表
+     * @param compactions   上下文压缩记录列表
+     * @param sink          SSE事件接收器
+     * @return LLM流式结果
+     * @throws Exception 调用失败时抛出异常
+     */
     public LlmStreamResult executeAttempt(
             String runId,
             int turnNo,
@@ -130,6 +212,22 @@ public final class LlmAttemptService {
         );
     }
 
+    /**
+     * 执行单次LLM调用尝试（带调用观察者）。
+     *
+     * @param runId         运行标识
+     * @param turnNo        轮次编号
+     * @param attemptId     尝试标识
+     * @param runContext    运行上下文，包含Provider配置
+     * @param model         模型名称
+     * @param params        LLM参数配置
+     * @param messages      消息列表
+     * @param allowedTools  允许使用的工具列表
+     * @param sink          SSE事件接收器
+     * @param callObserver  LLM调用观察者，用于预算控制回调
+     * @return LLM流式结果
+     * @throws Exception 调用失败时抛出异常
+     */
     public LlmStreamResult executeAttempt(
             String runId,
             int turnNo,
@@ -145,6 +243,26 @@ public final class LlmAttemptService {
         return executeAttempt(runId, turnNo, attemptId, runContext, model, params, messages, allowedTools, List.of(), sink, callObserver);
     }
 
+    /**
+     * 执行单次LLM调用尝试（完整版本）。
+     * <p>
+     * 支持Provider故障转移，当主Provider失败时自动切换到备用Provider。
+     * </p>
+     *
+     * @param runId         运行标识
+     * @param turnNo        轮次编号
+     * @param attemptId     尝试标识
+     * @param runContext    运行上下文，包含Provider配置
+     * @param model         模型名称
+     * @param params        LLM参数配置
+     * @param messages      消息列表
+     * @param allowedTools  允许使用的工具列表
+     * @param compactions   上下文压缩记录列表
+     * @param sink          SSE事件接收器
+     * @param callObserver  LLM调用观察者
+     * @return LLM流式结果
+     * @throws Exception 调用失败时抛出异常
+     */
     public LlmStreamResult executeAttempt(
             String runId,
             int turnNo,

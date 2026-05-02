@@ -7,7 +7,21 @@ import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
 
+/**
+ * Agent工具调用追踪Mapper接口
+ * <p>
+ * 提供Agent工具调用追踪实体的数据库访问操作，继承MyBatis-Plus的BaseMapper，
+ * 并扩展了按运行ID查询工具调用和查找缺失结果的工具调用功能。
+ * </p>
+ */
 public interface AgentToolCallTraceMapper extends BaseMapper<AgentToolCallTraceEntity> {
+
+    /**
+     * 根据运行ID查询所有工具调用追踪记录，按序列号升序排列
+     *
+     * @param runId Agent运行ID
+     * @return 工具调用追踪实体列表
+     */
     @Select("""
             SELECT tool_call_id, run_id, message_id, seq, tool_use_id, raw_tool_name, tool_name,
                    args_json, is_concurrent AS concurrent, idempotent, precheck_failed, precheck_error_json, created_at
@@ -17,6 +31,15 @@ public interface AgentToolCallTraceMapper extends BaseMapper<AgentToolCallTraceE
             """)
     List<AgentToolCallTraceEntity> findByRunId(@Param("runId") String runId);
 
+    /**
+     * 查找缺失结果的工具调用追踪记录
+     * <p>
+     * 查询指定运行ID下尚未产生结果的工具调用记录。
+     * </p>
+     *
+     * @param runId Agent运行ID
+     * @return 缺失结果的工具调用追踪实体列表
+     */
     @Select("""
             SELECT c.tool_call_id, c.run_id, c.message_id, c.seq, c.tool_use_id, c.raw_tool_name, c.tool_name,
                    c.args_json, c.is_concurrent AS concurrent, c.idempotent, c.precheck_failed, c.precheck_error_json, c.created_at

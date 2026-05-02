@@ -6,6 +6,13 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+/**
+ * 业务订单实体类
+ * <p>
+ * 映射数据库表 business_order，存储业务订单的核心信息，
+ * 包括订单ID、用户ID、订单状态、金额、商品名称等。
+ * </p>
+ */
 @TableName("business_order")
 public class BusinessOrderEntity {
     @TableId

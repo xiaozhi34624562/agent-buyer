@@ -29,6 +29,18 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 
+/**
+ * Agent轮次编排器，负责多轮对话的执行控制。
+ * <p>
+ * 主要职责包括：
+ * <ul>
+ *     <li>执行多轮LLM调用直到终止条件满足</li>
+ *     <li>处理运行超时和最大轮次限制</li>
+ *     <li>处理LLM预算超限暂停</li>
+ *     <li>处理工具调用的待确认和待输入状态</li>
+ * </ul>
+ * </p>
+ */
 @Service
 public final class AgentTurnOrchestrator {
     private static final Logger log = LoggerFactory.getLogger(AgentTurnOrchestrator.class);
@@ -42,6 +54,18 @@ public final class AgentTurnOrchestrator {
     private final RunStateMachine stateMachine;
     private final AgentExecutionBudget executionBudget;
 
+    /**
+     * 构造函数，注入所有必要的依赖组件。
+     *
+     * @param properties         Agent配置属性
+     * @param contextViewBuilder 上下文视图构建器
+     * @param llmAttemptService  LLM调用尝试服务
+     * @param toolCallCoordinator 工具调用协调器
+     * @param trajectoryReader   运行轨迹读取器
+     * @param trajectoryStore    运行轨迹存储
+     * @param stateMachine       运行状态机
+     * @param executionBudget    执行预算管理器
+     */
     public AgentTurnOrchestrator(
             AgentProperties properties,
             ContextViewBuilder contextViewBuilder,
@@ -62,6 +86,16 @@ public final class AgentTurnOrchestrator {
         this.executionBudget = executionBudget;
     }
 
+    /**
+     * 执行Agent运行直到终止条件满足。
+     *
+     * @param runId       运行标识
+     * @param userId      用户标识
+     * @param runContext  运行上下文
+     * @param params      LLM参数配置
+     * @param sink        SSE事件接收器
+     * @return 运行结果
+     */
     public AgentRunResult runUntilStop(
             String runId,
             String userId,
@@ -72,6 +106,16 @@ public final class AgentTurnOrchestrator {
         return runUntilStop(runId, runId, userId, runContext, params, sink, false);
     }
 
+    /**
+     * 执行子Agent运行直到终止条件满足（简化版本）。
+     *
+     * @param runId       运行标识
+     * @param userId      用户标识
+     * @param runContext  运行上下文
+     * @param params      LLM参数配置
+     * @param sink        SSE事件接收器
+     * @return 运行结果
+     */
     public AgentRunResult runSubAgentUntilStop(
             String runId,
             String userId,
@@ -82,6 +126,17 @@ public final class AgentTurnOrchestrator {
         return runSubAgentUntilStop(runId, runId, userId, runContext, params, sink);
     }
 
+    /**
+     * 执行子Agent运行直到终止条件满足（带独立预算范围）。
+     *
+     * @param runId              运行标识
+     * @param runWideBudgetRunId 预算范围标识，用于共享预算的子运行
+     * @param userId             用户标识
+     * @param runContext         运行上下文
+     * @param params             LLM参数配置
+     * @param sink               SSE事件接收器
+     * @return 运行结果
+     */
     public AgentRunResult runSubAgentUntilStop(
             String runId,
             String runWideBudgetRunId,
@@ -94,8 +149,17 @@ public final class AgentTurnOrchestrator {
     }
 
     /**
-     * Execute a pending confirmed tool directly (bypassing LLM).
-     * Used for HITL confirmation flow where user confirms and we execute the tool directly.
+     * 执行待确认的工具调用（绕过LLM）。
+     * <p>
+     * 用于HITL确认流程，当用户确认后直接执行工具而不经过LLM。
+     * </p>
+     *
+     * @param runId     运行标识
+     * @param userId    用户标识
+     * @param toolName  工具名称
+     * @param argsJson  参数JSON
+     * @param sink      SSE事件接收器
+     * @return 工具执行结果
      */
     public ToolTerminal executePendingConfirmTool(
             String runId,

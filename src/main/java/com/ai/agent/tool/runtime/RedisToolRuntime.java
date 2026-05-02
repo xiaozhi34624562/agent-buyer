@@ -7,6 +7,11 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 
+/**
+ * Redis实现的工具运行时，负责工具调用请求的接入和调度触发。
+ *
+ * <p>接收工具调用请求，将工具存入Redis队列，并触发执行调度。
+ */
 @Component
 public final class RedisToolRuntime implements ToolRuntime {
     private static final Logger log = LoggerFactory.getLogger(RedisToolRuntime.class);
@@ -22,6 +27,14 @@ public final class RedisToolRuntime implements ToolRuntime {
         this.launcher = launcher;
     }
 
+    /**
+     * 处理工具调用请求。
+     *
+     * <p>将工具调用存入等待队列，并触发调度执行。
+     *
+     * @param runId 运行标识符
+     * @param call 工具调用请求
+     */
     @Override
     public void onToolUse(String runId, ToolCall call) {
         try (MDC.MDCCloseable ignoredRun = MDC.putCloseable("runId", runId);
@@ -41,6 +54,11 @@ public final class RedisToolRuntime implements ToolRuntime {
         }
     }
 
+    /**
+     * 触发运行的调度执行。
+     *
+     * @param runId 运行标识符
+     */
     public void drainRun(String runId) {
         launcher.drainRun(runId);
     }

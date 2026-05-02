@@ -40,6 +40,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+/**
+ * 工具调用协调器，负责管理LLM产出工具调用的完整生命周期。
+ * <p>
+ * 主要职责包括：
+ * <ul>
+ *     <li>工具调用的预检查和提交</li>
+ *     <li>工具执行结果的等待和关闭</li>
+ *     <li>待确认工具和待用户输入状态的识别</li>
+ *     <li>运行终止时工具的中止和中断处理</li>
+ * </ul>
+ * </p>
+ */
 @Service
 public final class ToolCallCoordinator {
     private static final Logger log = LoggerFactory.getLogger(ToolCallCoordinator.class);
@@ -56,6 +68,21 @@ public final class ToolCallCoordinator {
     private final ObjectMapper objectMapper;
     private final SensitivePayloadSanitizer sanitizer;
 
+    /**
+     * 构造函数，注入所有必要的依赖组件。
+     *
+     * @param properties              Agent配置属性
+     * @param toolRegistry            工具注册表
+     * @param toolRuntime             工具运行时
+     * @param redisToolStore          Redis工具状态存储
+     * @param toolResultWaiter        工具结果等待器
+     * @param trajectoryStore         运行轨迹存储
+     * @param trajectoryReader        运行轨迹读取器
+     * @param toolResultCloser        工具结果关闭器
+     * @param pendingConfirmToolStore 待确认工具存储
+     * @param objectMapper            JSON对象映射器
+     * @param sanitizer               敏感数据脱敏器
+     */
     public ToolCallCoordinator(
             AgentProperties properties,
             ToolRegistry toolRegistry,
@@ -82,6 +109,26 @@ public final class ToolCallCoordinator {
         this.sanitizer = sanitizer;
     }
 
+    /**
+     * 处理LLM产出的工具调用列表。
+     * <p>
+     * 执行流程：
+     * <ol>
+     *     <li>提交工具调用并进行预检查</li>
+     *     <li>发送工具使用事件通知</li>
+     *     <li>关闭预检查失败的工具调用</li>
+     *     <li>等待可执行工具的结果并关闭</li>
+     *     <li>识别待确认或待用户输入状态</li>
+     * </ol>
+     * </p>
+     *
+     * @param runId         运行标识
+     * @param userId        用户标识
+     * @param result        LLM流式结果，包含工具调用列表
+     * @param allowedTools  允许使用的工具列表
+     * @param sink          SSE事件接收器
+     * @return 工具步骤结果，包含所有调用、可执行调用、终端结果、待确认和待输入状态
+     */
     public ToolStepResult processToolCalls(
             String runId,
             String userId,
@@ -117,18 +164,40 @@ public final class ToolCallCoordinator {
         );
     }
 
+    /**
+     * 中止运行中的所有工具调用。
+     *
+     * @param runId  运行标识
+     * @param reason 中止原因
+     * @param sink   SSE事件接收器
+     * @return 已中止的工具终端结果列表
+     */
     public List<ToolTerminal> abortRunTools(String runId, String reason, AgentEventSink sink) {
         List<ToolTerminal> terminals = redisToolStore.abort(runId, reason);
         toolResultCloser.closeTerminals(runId, terminals, sink);
         return terminals;
     }
 
+    /**
+     * 中断运行中的所有工具调用。
+     *
+     * @param runId  运行标识
+     * @param reason 中断原因
+     * @param sink   SSE事件接收器
+     * @return 已中断的工具终端结果列表
+     */
     public List<ToolTerminal> interruptRunTools(String runId, String reason, AgentEventSink sink) {
         List<ToolTerminal> terminals = redisToolStore.interrupt(runId, reason);
         toolResultCloser.closeTerminals(runId, terminals, sink);
         return terminals;
     }
 
+    /**
+     * 根据运行上下文中的允许工具名称列表解析工具实例。
+     *
+     * @param effectiveAllowedTools 允许使用的工具名称列表
+     * @return 工具实例列表，按名称排序
+     */
     public List<Tool> toolsFromContext(List<String> effectiveAllowedTools) {
         return effectiveAllowedTools.stream()
                 .map(toolRegistry::resolve)
@@ -460,15 +529,17 @@ public final class ToolCallCoordinator {
     }
 
     /**
-     * Execute a pending confirmed tool call directly (bypassing LLM).
-     * Used for HITL confirmation flow where user confirms and we execute the tool directly.
+     * 执行待确认的工具调用（绕过LLM）。
+     * <p>
+     * 用于HITL确认流程，当用户确认后直接执行工具而不经过LLM。
+     * </p>
      *
-     * @param runId run identifier
-     * @param userId user identifier
-     * @param toolName tool name to execute
-     * @param argsJson arguments JSON (with confirmToken already included)
-     * @param sink event sink for SSE notifications
-     * @return the tool execution result
+     * @param runId     运行标识
+     * @param userId    用户标识
+     * @param toolName  工具名称
+     * @param argsJson  参数JSON（已包含confirmToken）
+     * @param sink      SSE事件接收器
+     * @return 工具执行结果
      */
     public ToolTerminal executePendingConfirmTool(
             String runId,

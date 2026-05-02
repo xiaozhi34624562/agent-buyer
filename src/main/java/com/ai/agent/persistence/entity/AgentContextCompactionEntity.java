@@ -5,6 +5,13 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
+/**
+ * Agent上下文压缩实体类
+ * <p>
+ * 映射数据库表 agent_context_compaction，记录Agent运行过程中上下文压缩的详细信息，
+ * 包括压缩策略、压缩前后Token数量变化等。
+ * </p>
+ */
 @TableName("agent_context_compaction")
 public class AgentContextCompactionEntity {
     @TableId
