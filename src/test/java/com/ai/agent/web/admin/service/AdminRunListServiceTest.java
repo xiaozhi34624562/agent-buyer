@@ -101,17 +101,16 @@ class AdminRunListServiceTest {
     }
 
     @Test
-    @DisplayName("listRuns should not accept dynamic sort parameter")
-    void listRuns_noDynamicSort() {
+    @DisplayName("listRuns should use fixed ORDER BY updated_at DESC")
+    void listRuns_fixedOrder() {
         AdminRunListQuery query = new AdminRunListQuery();
         query.setPage(1);
         query.setPageSize(10);
-        query.setSortBy("run_id"); // Should be ignored
 
         List<AdminRunListDto> runs = service.listRuns(query);
 
         assertThat(runs).isNotNull();
-        // Order should still be by updated_at DESC, not run_id
+        // Order is fixed by updated_at DESC - no sort parameter available
     }
 
     @Test

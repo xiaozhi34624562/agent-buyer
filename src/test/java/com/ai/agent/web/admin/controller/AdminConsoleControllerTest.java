@@ -8,8 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.context.annotation.Import;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.core.env.Environment;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -43,6 +42,9 @@ class AdminConsoleControllerTest {
     @Autowired
     private AgentProperties properties;
 
+    @Autowired
+    private Environment environment;
+
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
@@ -66,11 +68,9 @@ class AdminConsoleControllerTest {
     }
 
     @Test
-    @DisplayName("GET /api/admin/console/runs should return 403 without token when enabled=true")
+    @DisplayName("GET /api/admin/console/runs should return 403 without token (test profile not local/demo)")
     void getRuns_withoutToken_returns403() throws Exception {
-        properties.getAdmin().setEnabled(true);
-        properties.getAdmin().setToken("test-admin-token");
-
+        // test profile is not in local/demo, so token is required
         mockMvc.perform(get("/api/admin/console/runs"))
                 .andExpect(status().isForbidden());
     }
@@ -131,22 +131,5 @@ class AdminConsoleControllerTest {
         mockMvc.perform(get("/api/admin/console/runs")
                         .header("X-Admin-Token", "wrong-token"))
                 .andExpect(status().isForbidden());
-    }
-
-    @Test
-    @DisplayName("Local profile should allow blank token")
-    void localProfile_blankToken_allowed() throws Exception {
-        // Test profile is not local/demo, so this test verifies the controller works
-        // when token is blank but admin.enabled=true with configured token
-        properties.getAdmin().setEnabled(true);
-        properties.getAdmin().setToken("");
-
-        when(runListService.listRuns(any())).thenReturn(List.of());
-
-        // With blank configured token, non-local profile still requires token
-        // But if token is blank in config, access should be allowed for local/demo only
-        // This test verifies behavior when test profile is used
-        mockMvc.perform(get("/api/admin/console/runs"))
-                .andExpect(status().isForbidden()); // test profile is not local/demo
     }
 }

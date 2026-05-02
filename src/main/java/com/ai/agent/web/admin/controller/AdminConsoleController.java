@@ -6,7 +6,6 @@ import com.ai.agent.web.admin.dto.AdminRuntimeStateDto;
 import com.ai.agent.web.admin.service.AdminAccessGuard;
 import com.ai.agent.web.admin.service.AdminRunListService;
 import com.ai.agent.web.admin.service.AdminRuntimeStateService;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -21,18 +20,15 @@ public class AdminConsoleController {
     private final AdminAccessGuard accessGuard;
     private final AdminRunListService runListService;
     private final AdminRuntimeStateService runtimeStateService;
-    private final String activeProfile;
 
     public AdminConsoleController(
             AdminAccessGuard accessGuard,
             AdminRunListService runListService,
-            AdminRuntimeStateService runtimeStateService,
-            @Value("${spring.profiles.active:default}") String activeProfile
+            AdminRuntimeStateService runtimeStateService
     ) {
         this.accessGuard = accessGuard;
         this.runListService = runListService;
         this.runtimeStateService = runtimeStateService;
-        this.activeProfile = activeProfile;
     }
 
     @GetMapping("/runs")
@@ -43,7 +39,7 @@ public class AdminConsoleController {
             @RequestParam(value = "status", required = false) String status,
             @RequestParam(value = "userId", required = false) String userId
     ) {
-        accessGuard.checkAccess(activeProfile, adminToken);
+        accessGuard.checkAccess(adminToken);
 
         AdminRunListQuery query = new AdminRunListQuery();
         query.setPage(page);
@@ -60,7 +56,7 @@ public class AdminConsoleController {
             @RequestHeader(value = "X-Admin-Token", required = false) String adminToken,
             @PathVariable String runId
     ) {
-        accessGuard.checkAccess(activeProfile, adminToken);
+        accessGuard.checkAccess(adminToken);
 
         AdminRuntimeStateDto state = runtimeStateService.getRuntimeState(runId);
         return ResponseEntity.ok(state);

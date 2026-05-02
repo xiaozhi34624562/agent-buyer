@@ -5,7 +5,6 @@ public class AdminRunListQuery {
     private Integer pageSize = 20;
     private String status;
     private String userId;
-    private String sortBy; // Ignored - fixed sort order
 
     public Integer getPage() {
         return page;
@@ -37,14 +36,6 @@ public class AdminRunListQuery {
 
     public void setUserId(String userId) {
         this.userId = userId;
-    }
-
-    public String getSortBy() {
-        return sortBy;
-    }
-
-    public void setSortBy(String sortBy) {
-        this.sortBy = sortBy;
     }
 
     public int getClampedPage() {
