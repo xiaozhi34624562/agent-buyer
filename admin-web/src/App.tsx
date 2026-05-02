@@ -12,6 +12,7 @@ import { useRuntimeState } from './hooks/useRuntimeState'
 import { useChatStream } from './hooks/useChatStream'
 import { useChatMessages } from './hooks/useChatMessages'
 import { readSseStream } from './api/sseParser'
+import { DEFAULT_ALLOWED_TOOL_NAMES, DEFAULT_LLM_PARAMS } from './api/agentApi'
 import type { SseEvent } from './types'
 
 function App() {
@@ -72,12 +73,8 @@ function App() {
         },
         body: JSON.stringify({
           messages: [{ role: 'user', content: prompt }],
-          allowedToolNames: ['query_order', 'cancel_order', 'skill_list', 'skill_view', 'agent_tool', 'todo_create', 'todo_write'],
-          llmParams: {
-            model: 'deepseek-reasoner',
-            temperature: 0.2,
-            maxTokens: 4096,
-          },
+          allowedToolNames: DEFAULT_ALLOWED_TOOL_NAMES,
+          llmParams: DEFAULT_LLM_PARAMS,
         }),
       })
 

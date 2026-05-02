@@ -3,6 +3,7 @@ package com.ai.agent.web.admin.service;
 import com.ai.agent.tool.runtime.redis.RedisKeys;
 import com.ai.agent.web.admin.dto.AdminRuntimeStateDto;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
@@ -78,15 +79,16 @@ public class AdminRuntimeStateService {
     }
 
     private Map<String, String> getZsetEntries(String key) {
-        Set<String> members = redisTemplate.opsForZSet().range(key, 0, -1);
-        if (members == null || members.isEmpty()) {
+        // Use rangeWithScores to avoid N+1 pattern - single Redis call instead of 1 + N calls
+        Set<ZSetOperations.TypedTuple<String>> tuples = redisTemplate.opsForZSet().rangeWithScores(key, 0, -1);
+        if (tuples == null || tuples.isEmpty()) {
             return new HashMap<>();
         }
         Map<String, String> result = new LinkedHashMap<>();
-        members.forEach(m -> {
-            Double score = redisTemplate.opsForZSet().score(key, m);
-            result.put(m, score != null ? String.valueOf(score.longValue()) : null);
-        });
+        for (ZSetOperations.TypedTuple<String> tuple : tuples) {
+            Double score = tuple.getScore();
+            result.put(tuple.getValue(), score != null ? String.valueOf(score.longValue()) : null);
+        }
         return result;
     }
 

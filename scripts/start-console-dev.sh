@@ -19,7 +19,7 @@ echo "=== Agent Buyer Console Dev Startup ==="
 echo "Project root: $PROJECT_ROOT"
 echo "Admin-web: $ADMIN_WEB"
 
-# Get MySQL password from environment or prompt
+# Get MySQL password from environment or use default for local dev
 if [ -z "$MYSQL_PASSWORD" ]; then
     echo "${YELLOW}MYSQL_PASSWORD not set. Using default for local dev.${NC}"
     MYSQL_PASSWORD='Qaz1234!'

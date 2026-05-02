@@ -111,6 +111,8 @@ export function parseSseChunks(chunks: string[]): SseParseResult {
  * Unified reader for all SSE streams - handles split chunks, ping, and malformed JSON.
  * Normalizes toolName field (handles legacy 'name' field).
  */
+const MAX_BUFFER_SIZE = 1024 * 1024 // 1MB limit to prevent memory exhaustion
+
 export async function* readSseStream(response: Response): AsyncIterable<SseEvent> {
   const reader = response.body?.getReader()
   if (!reader) {
@@ -126,6 +128,12 @@ export async function* readSseStream(response: Response): AsyncIterable<SseEvent
       if (done) break
 
       buffer += decoder.decode(value, { stream: true })
+
+      // Guard against unbounded buffer growth (malformed stream without newlines)
+      if (buffer.length > MAX_BUFFER_SIZE) {
+        throw new Error(`SSE buffer exceeded ${MAX_BUFFER_SIZE} bytes - possible malformed stream`)
+      }
+
       const lines = buffer.split('\n')
       buffer = lines.pop() ?? ''
 

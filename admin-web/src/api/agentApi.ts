@@ -2,6 +2,19 @@ import { readSseStream } from './sseParser'
 
 const API_BASE = '/api/agent'
 
+// Default configuration for agent runs
+export const DEFAULT_ALLOWED_TOOL_NAMES = [
+  'query_order', 'cancel_order', 'skill_list', 'skill_view',
+  'agent_tool', 'todo_create', 'todo_write'
+] as const
+
+export const DEFAULT_LLM_PARAMS: LlmParams = {
+  model: 'deepseek-reasoner',
+  temperature: 0.2,
+  maxTokens: 4096,
+  maxTurns: 10,
+}
+
 export interface UserMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
@@ -42,12 +55,12 @@ export function createAgentApi(config: AgentApiConfig) {
       headers: headers(),
       body: JSON.stringify({
         messages: request.messages,
-        allowedToolNames: request.allowedToolNames ?? ['query_order', 'cancel_order', 'skill_list', 'skill_view', 'agent_tool', 'todo_create', 'todo_write'],
+        allowedToolNames: request.allowedToolNames ?? DEFAULT_ALLOWED_TOOL_NAMES,
         llmParams: {
-          model: request.llmParams?.model ?? 'deepseek-reasoner',
-          temperature: request.llmParams?.temperature ?? 0.2,
-          maxTokens: request.llmParams?.maxTokens ?? 4096,
-          maxTurns: request.llmParams?.maxTurns ?? 10,
+          model: request.llmParams?.model ?? DEFAULT_LLM_PARAMS.model,
+          temperature: request.llmParams?.temperature ?? DEFAULT_LLM_PARAMS.temperature,
+          maxTokens: request.llmParams?.maxTokens ?? DEFAULT_LLM_PARAMS.maxTokens,
+          maxTurns: request.llmParams?.maxTurns ?? DEFAULT_LLM_PARAMS.maxTurns,
         },
       }),
     })
