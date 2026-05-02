@@ -17,11 +17,13 @@ import com.ai.agent.tool.runtime.ToolResultCloser;
 import com.ai.agent.tool.runtime.ToolResultWaiter;
 import com.ai.agent.tool.runtime.ToolRuntime;
 import com.ai.agent.tool.runtime.redis.RedisToolStore;
+import com.ai.agent.tool.security.PendingConfirmToolStore;
 import com.ai.agent.trajectory.port.TrajectoryReader;
 import com.ai.agent.trajectory.port.TrajectoryStore;
 import com.ai.agent.util.Ids;
 import com.ai.agent.web.sse.AgentEventSink;
 import com.ai.agent.web.sse.ToolUseEvent;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
@@ -49,6 +51,7 @@ public final class ToolCallCoordinator {
     private final TrajectoryStore trajectoryStore;
     private final TrajectoryReader trajectoryReader;
     private final ToolResultCloser toolResultCloser;
+    private final PendingConfirmToolStore pendingConfirmToolStore;
     private final ObjectMapper objectMapper;
 
     public ToolCallCoordinator(
@@ -60,6 +63,7 @@ public final class ToolCallCoordinator {
             TrajectoryStore trajectoryStore,
             TrajectoryReader trajectoryReader,
             ToolResultCloser toolResultCloser,
+            PendingConfirmToolStore pendingConfirmToolStore,
             ObjectMapper objectMapper
     ) {
         this.properties = properties;
@@ -70,6 +74,7 @@ public final class ToolCallCoordinator {
         this.trajectoryStore = trajectoryStore;
         this.trajectoryReader = trajectoryReader;
         this.toolResultCloser = toolResultCloser;
+        this.pendingConfirmToolStore = pendingConfirmToolStore;
         this.objectMapper = objectMapper;
     }
 
@@ -103,7 +108,7 @@ public final class ToolCallCoordinator {
                 commit.allCalls(),
                 commit.executableCalls(),
                 terminals,
-                findPendingConfirm(terminals),
+                findPendingConfirm(runId, terminals, commit.allCalls()),
                 findPendingUserInput(terminals)
         );
     }
@@ -298,7 +303,11 @@ public final class ToolCallCoordinator {
                 ));
     }
 
-    private PendingConfirm findPendingConfirm(List<ToolTerminal> terminals) {
+    private PendingConfirm findPendingConfirm(String runId, List<ToolTerminal> terminals, List<ToolCall> allCalls) {
+        // Build a map of toolCallId -> ToolCall for lookup
+        Map<String, ToolCall> callsById = allCalls.stream()
+                .collect(Collectors.toMap(ToolCall::toolCallId, Function.identity(), (left, right) -> left));
+
         for (ToolTerminal terminal : terminals) {
             if (terminal.resultJson() == null || terminal.resultJson().isBlank()) {
                 continue;
@@ -306,13 +315,71 @@ public final class ToolCallCoordinator {
             try {
                 JsonNode root = objectMapper.readTree(terminal.resultJson());
                 if ("PENDING_CONFIRM".equals(root.path("actionStatus").asText())) {
-                    return new PendingConfirm(root.path("summary").asText("请确认是否继续。"));
+                    ToolCall call = callsById.get(terminal.toolCallId());
+                    if (call == null) {
+                        log.warn("PENDING_CONFIRM terminal has no matching tool call toolCallId={}", terminal.toolCallId());
+                        continue;
+                    }
+                    String summary = root.path("summary").asText("请确认是否继续。");
+                    String confirmToken = root.path("confirmToken").asText(null);
+                    String orderId = root.path("orderId").asText(null);
+
+                    // Build argsJson with confirmToken for execution
+                    String argsJsonWithToken = buildArgsWithConfirmToken(call.argsJson(), confirmToken, orderId);
+
+                    PendingConfirm pending = new PendingConfirm(
+                            call.toolCallId(),
+                            call.toolName(),
+                            argsJsonWithToken,
+                            confirmToken,
+                            summary
+                    );
+
+                    // Save pending tool context for automatic execution on confirmation
+                    pendingConfirmToolStore.save(
+                            runId,
+                            call.toolCallId(),
+                            call.toolName(),
+                            argsJsonWithToken,
+                            confirmToken,
+                            summary
+                    );
+
+                    return pending;
                 }
             } catch (Exception ignored) {
                 // Non-JSON tool results are allowed; they simply cannot request confirmation.
             }
         }
         return null;
+    }
+
+    /**
+     * Build argsJson with confirmToken added.
+     */
+    private String buildArgsWithConfirmToken(String originalArgsJson, String confirmToken, String orderId) {
+        try {
+            JsonNode args = objectMapper.readTree(originalArgsJson);
+            Map<String, Object> argsMap = new LinkedHashMap<>();
+            args.fields().forEachRemaining(entry -> {
+                try {
+                    argsMap.put(entry.getKey(), objectMapper.treeToValue(entry.getValue(), Object.class));
+                } catch (JsonProcessingException e) {
+                    // Use raw string value as fallback
+                    argsMap.put(entry.getKey(), entry.getValue().asText());
+                }
+            });
+            if (confirmToken != null && !confirmToken.isBlank()) {
+                argsMap.put("confirmToken", confirmToken);
+            }
+            if (orderId != null && !orderId.isBlank()) {
+                argsMap.put("orderId", orderId);
+            }
+            return objectMapper.writeValueAsString(argsMap);
+        } catch (Exception e) {
+            log.warn("failed to build args with confirmToken: {}", e.getMessage());
+            return originalArgsJson;
+        }
     }
 
     private PendingUserInput findPendingUserInput(List<ToolTerminal> terminals) {
@@ -371,7 +438,13 @@ public final class ToolCallCoordinator {
     ) {
     }
 
-    public record PendingConfirm(String summary) {
+    public record PendingConfirm(
+            String toolCallId,
+            String toolName,
+            String argsJson,
+            String confirmToken,
+            String summary
+    ) {
     }
 
     public record PendingUserInput(String question) {

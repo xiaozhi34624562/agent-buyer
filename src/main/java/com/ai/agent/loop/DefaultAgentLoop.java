@@ -7,10 +7,12 @@ import com.ai.agent.config.AgentProperties;
 import com.ai.agent.domain.RunStatus;
 import com.ai.agent.llm.context.PromptAssembler;
 import com.ai.agent.llm.model.LlmMessage;
+import com.ai.agent.llm.model.ToolCallMessage;
 import com.ai.agent.tool.core.Tool;
 import com.ai.agent.tool.registry.ToolRegistry;
 import com.ai.agent.tool.runtime.RunEventSinkRegistry;
 import com.ai.agent.tool.security.ConfirmTokenStore;
+import com.ai.agent.tool.security.PendingConfirmToolStore;
 import com.ai.agent.trajectory.model.RunContext;
 import com.ai.agent.trajectory.port.RunContextStore;
 import com.ai.agent.trajectory.port.TrajectoryStore;
@@ -52,6 +54,7 @@ public final class DefaultAgentLoop implements AgentLoop {
     private final AgentTurnOrchestrator turnOrchestrator;
     private final HumanIntentResolver humanIntentResolver;
     private final ConfirmTokenStore confirmTokenStore;
+    private final PendingConfirmToolStore pendingConfirmToolStore;
 
     @Autowired
     public DefaultAgentLoop(
@@ -64,7 +67,8 @@ public final class DefaultAgentLoop implements AgentLoop {
             RunAccessManager runAccessManager,
             AgentTurnOrchestrator turnOrchestrator,
             HumanIntentResolver humanIntentResolver,
-            ConfirmTokenStore confirmTokenStore
+            ConfirmTokenStore confirmTokenStore,
+            PendingConfirmToolStore pendingConfirmToolStore
     ) {
         this.properties = properties;
         this.promptAssembler = promptAssembler;
@@ -77,6 +81,7 @@ public final class DefaultAgentLoop implements AgentLoop {
         this.turnOrchestrator = turnOrchestrator;
         this.humanIntentResolver = humanIntentResolver;
         this.confirmTokenStore = confirmTokenStore;
+        this.pendingConfirmToolStore = pendingConfirmToolStore;
     }
 
     @Override
@@ -172,6 +177,7 @@ public final class DefaultAgentLoop implements AgentLoop {
             );
             if (confirmationDecision.intent() == HumanIntentResolver.ConfirmationIntent.REJECT) {
                 confirmTokenStore.clearRun(runId);
+                pendingConfirmToolStore.clearRun(runId);
                 String finalText = "已取消本次操作，订单未被更改。";
                 trajectoryStore.appendMessage(runId, LlmMessage.assistant(Ids.newId("msg"), finalText, List.of()));
                 AgentRunResult terminal = transitionTerminal(runId, RunStatus.SUCCEEDED, null, finalText);
@@ -195,7 +201,25 @@ public final class DefaultAgentLoop implements AgentLoop {
                 log.info("agent continuation remains waiting because user confirmation intent is ambiguous");
                 return waiting;
             }
-            log.info("agent continuation resumed");
+            // CONFIRM intent: inject synthetic tool call with confirmToken and execute
+            log.info("agent continuation confirmed - injecting pending tool call");
+            PendingConfirmToolStore.PendingConfirmTool pendingTool = pendingConfirmToolStore.consume(runId);
+            if (pendingTool != null) {
+                // Create synthetic assistant message with pending tool call
+                ToolCallMessage syntheticCall = new ToolCallMessage(
+                        pendingTool.toolCallId(),
+                        pendingTool.toolName(),
+                        pendingTool.argsJson()
+                );
+                trajectoryStore.appendMessage(runId, LlmMessage.assistant(
+                        Ids.newId("msg"),
+                        null,  // No text content, just tool call
+                        List.of(syntheticCall)
+                ));
+                log.info("synthetic tool call injected toolName={} toolCallId={}", pendingTool.toolName(), pendingTool.toolCallId());
+            } else {
+                log.warn("no pending tool found for runId={} - proceeding with normal continuation", runId);
+            }
             return runUntilStop(runId, userId, runContext, null, sink);
         } finally {
             sinkRegistry.unbind(runId);
